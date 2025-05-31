@@ -12,10 +12,40 @@ from dotenv import load_dotenv
 
 from db.database import get_database, init_database
 from db.models import Building, EmailLog
-from agents.building_pipeline import BuildingPipeline
-from services.gmail_api import GmailService
+# Temporarily comment out complex imports for testing
+# from agents.building_pipeline import BuildingPipeline
+# from services.gmail_api import GmailService
 
 load_dotenv()
+
+# Temporary mock classes for testing
+class MockBuildingPipeline:
+    def process_bounding_boxes(self, bboxes, db):
+        print(f"Mock: Processing {len(bboxes)} bounding boxes")
+        # Create a mock building for testing
+        mock_building = Building(
+            address="123 Mock Street, NYC",
+            building_type="residential_apartment",
+            bounding_box={"north": 40.7829, "south": 40.7829, "east": -73.9654, "west": -73.9654}
+        )
+        db.add(mock_building)
+        db.commit()
+        return {"status": "completed", "buildings_found": 1}
+    
+    def process_approved_building(self, building_id, db):
+        print(f"Mock: Processing approved building {building_id}")
+        building = db.query(Building).filter(Building.id == building_id).first()
+        if building:
+            building.contact_email = "mock@example.com"
+            building.contact_name = "Mock Contact"
+            building.email_sent = True
+            db.commit()
+        return {"status": "completed"}
+
+class MockGmailService:
+    def check_for_replies(self, email):
+        print(f"Mock: Checking for replies from {email}")
+        return False  # Mock: no replies found
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -67,9 +97,9 @@ class BuildingResponse(BaseModel):
         from_attributes = True
 
 
-# Initialize services
-building_pipeline = BuildingPipeline()
-gmail_service = GmailService()
+# Initialize services (mock for now)
+building_pipeline = MockBuildingPipeline()
+gmail_service = MockGmailService()
 
 
 @app.get("/")
