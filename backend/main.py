@@ -5,47 +5,23 @@ Main FastAPI application for AI Realtor system.
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
+from datetime import datetime
 import os
 from dotenv import load_dotenv
 
 from db.database import get_database, init_database
 from db.models import Building, EmailLog
-# Temporarily comment out complex imports for testing
+# Import the real services instead of using mocks
 # from agents.building_pipeline import BuildingPipeline
+from agents.get_buildings import BuildingFinder
 # from services.gmail_api import GmailService
 
+# Skip service imports that require Google auth for now
+print("⚠️ Skipping Google services initialization for testing")
+
 load_dotenv()
-
-# Temporary mock classes for testing
-class MockBuildingPipeline:
-    def process_bounding_boxes(self, bboxes, db):
-        print(f"Mock: Processing {len(bboxes)} bounding boxes")
-        # Create a mock building for testing
-        mock_building = Building(
-            address="123 Mock Street, NYC",
-            building_type="residential_apartment",
-            bounding_box={"north": 40.7829, "south": 40.7829, "east": -73.9654, "west": -73.9654}
-        )
-        db.add(mock_building)
-        db.commit()
-        return {"status": "completed", "buildings_found": 1}
-    
-    def process_approved_building(self, building_id, db):
-        print(f"Mock: Processing approved building {building_id}")
-        building = db.query(Building).filter(Building.id == building_id).first()
-        if building:
-            building.contact_email = "mock@example.com"
-            building.contact_name = "Mock Contact"
-            building.email_sent = True
-            db.commit()
-        return {"status": "completed"}
-
-class MockGmailService:
-    def check_for_replies(self, email):
-        print(f"Mock: Checking for replies from {email}")
-        return False  # Mock: no replies found
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -83,32 +59,111 @@ class ApproveBuildingRequest(BaseModel):
 
 class BuildingResponse(BaseModel):
     id: int
-    name: str = None
+    name: Optional[str] = None
     address: str
     building_type: str
     approved: bool
-    contact_email: str = None
-    contact_name: str = None
+    contact_email: Optional[str] = None
+    contact_name: Optional[str] = None
     email_sent: bool
     reply_received: bool
-    created_at: str
+    created_at: datetime
     
     class Config:
         from_attributes = True
 
 
-# Initialize services (mock for now)
-building_pipeline = MockBuildingPipeline()
-gmail_service = MockGmailService()
+# Enable real building discovery without Google OAuth requirements
+print("✅ Initializing realistic building pipeline...")
+
+# Create a custom pipeline that uses real building finding but skips Google services
+class RealisticBuildingPipeline:
+    def __init__(self):
+        self.building_finder = BuildingFinder()
+        print("✅ Building finder initialized")
+    
+    def process_bounding_boxes(self, bboxes, db):
+        """Find real buildings using the BuildingFinder."""
+        import asyncio
+        import json
+        from db.models import Building
+        
+        print(f"Processing {len(bboxes)} bounding boxes with realistic building finder...")
+        
+        buildings_created = []
+        
+        try:
+            # Use asyncio to call the async building finder
+            for bbox in bboxes:
+                bbox_dict = {
+                    "north": bbox.north,
+                    "south": bbox.south, 
+                    "east": bbox.east,
+                    "west": bbox.west
+                }
+                
+                # Get real buildings from the building finder
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                buildings_data = loop.run_until_complete(
+                    self.building_finder.get_buildings_from_bbox(bbox_dict)
+                )
+                loop.close()
+                
+                # Create building records in database
+                for building_data in buildings_data:
+                    building = Building(
+                        name=building_data.get('name'),
+                        address=building_data['address'],
+                        building_type=building_data.get('building_type', 'residential_apartment'),
+                        bounding_box=json.dumps(bbox_dict),
+                        approved=False,
+                        email_sent=False,
+                        reply_received=False,
+                        # Store additional building details as metadata
+                        property_manager=building_data.get('property_manager'),
+                        number_of_units=building_data.get('estimated_units'),
+                        year_built=building_data.get('year_built')
+                    )
+                    db.add(building)
+                    buildings_created.append(building)
+            
+            db.commit()
+            print(f"✅ Created {len(buildings_created)} realistic buildings from building finder")
+            return {"status": "completed", "buildings_found": len(buildings_created)}
+            
+        except Exception as e:
+            print(f"Error in realistic building pipeline: {e}")
+            db.rollback()
+            raise e
+    
+    def process_approved_building(self, building_id, db):
+        print(f"📧 Would process building {building_id} (email features disabled)")
+        # Mark building as having email sent for demo purposes
+        from db.models import Building
+        building = db.query(Building).filter(Building.id == building_id).first()
+        if building:
+            building.email_sent = True
+            building.contact_email = "demo@example.com"
+            building.contact_name = "Demo Contact"
+            db.commit()
+        return {"status": "completed"}
+
+building_pipeline = RealisticBuildingPipeline()
+
+# Skip Gmail for testing
+gmail_service = None
+print("⚠️ Gmail service skipped for testing (Google verification needed)")
+print("📧 Email features will be disabled until Gmail is set up")
 
 
-@app.get("/")
+@app.get("/api/")
 async def root():
     """Health check endpoint."""
     return {"message": "AI Realtor API is running"}
 
 
-@app.post("/process-bbox")
+@app.post("/api/process-bbox")
 async def process_bounding_boxes(
     request: ProcessBboxRequest,
     background_tasks: BackgroundTasks,
@@ -119,12 +174,28 @@ async def process_bounding_boxes(
     This runs as a background task to handle potentially long-running operations.
     """
     try:
-        # Start the building discovery and enrichment pipeline
-        background_tasks.add_task(
-            building_pipeline.process_bounding_boxes,
-            request.bounding_boxes,
-            db
-        )
+        # Check if services are properly initialized
+        if building_pipeline is None:
+            raise HTTPException(
+                status_code=503, 
+                detail="Building pipeline service not available. Please check your API keys and configuration."
+            )
+        
+        # For real BuildingPipeline, call the async method directly
+        if hasattr(building_pipeline, 'process_bounding_boxes_sync'):
+            # Real BuildingPipeline with async support
+            background_tasks.add_task(
+                building_pipeline.process_bounding_boxes_sync,
+                request.bounding_boxes,
+                db
+            )
+        else:
+            # Fallback synchronous pipeline
+            background_tasks.add_task(
+                building_pipeline.process_bounding_boxes,
+                request.bounding_boxes,
+                db
+            )
         
         return {
             "message": "Processing bounding boxes started",
@@ -135,7 +206,7 @@ async def process_bounding_boxes(
         raise HTTPException(status_code=500, detail=f"Error processing bounding boxes: {str(e)}")
 
 
-@app.post("/approve-building")
+@app.post("/api/approve-building")
 async def approve_building(
     request: ApproveBuildingRequest,
     background_tasks: BackgroundTasks,
@@ -145,6 +216,13 @@ async def approve_building(
     Approve a building and trigger the contact finding + email outreach flow.
     """
     try:
+        # Check if services are properly initialized
+        if building_pipeline is None:
+            raise HTTPException(
+                status_code=503, 
+                detail="Building pipeline service not available. Please check your API keys and configuration."
+            )
+        
         # Get the building
         building = db.query(Building).filter(Building.id == request.building_id).first()
         if not building:
@@ -170,19 +248,37 @@ async def approve_building(
         raise HTTPException(status_code=500, detail=f"Error approving building: {str(e)}")
 
 
-@app.get("/buildings", response_model=List[BuildingResponse])
+@app.get("/api/buildings")
 async def get_buildings(db: Session = Depends(get_database)):
     """
-    Get all buildings and their current status.
+    Get all buildings and their current status from the actual database.
     """
     try:
-        buildings = db.query(Building).order_by(Building.created_at.desc()).all()
-        return buildings
+        # Get all buildings from database
+        buildings = db.query(Building).all()
+        
+        # Convert to the format expected by frontend
+        building_list = []
+        for building in buildings:
+            building_list.append({
+                "id": building.id,
+                "name": building.name,
+                "address": building.address,
+                "building_type": building.building_type,
+                "approved": building.approved,
+                "contact_email": building.contact_email,
+                "contact_name": building.contact_name,
+                "email_sent": building.email_sent,
+                "reply_received": building.reply_received,
+                "created_at": building.created_at.isoformat() if building.created_at else None
+            })
+        
+        return building_list
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching buildings: {str(e)}")
 
 
-@app.get("/buildings/{building_id}")
+@app.get("/api/buildings/{building_id}")
 async def get_building(building_id: int, db: Session = Depends(get_database)):
     """
     Get detailed information about a specific building including email logs.
@@ -203,7 +299,7 @@ async def get_building(building_id: int, db: Session = Depends(get_database)):
         raise HTTPException(status_code=500, detail=f"Error fetching building: {str(e)}")
 
 
-@app.post("/webhook/email")
+@app.post("/api/webhook/email")
 async def email_webhook(
     payload: Dict[Any, Any],
     db: Session = Depends(get_database)
@@ -221,13 +317,23 @@ async def email_webhook(
         raise HTTPException(status_code=500, detail=f"Error processing webhook: {str(e)}")
 
 
-@app.get("/email-status")
+@app.get("/api/email-status")
 async def check_email_status(db: Session = Depends(get_database)):
     """
     Manually check for email replies and update statuses.
     This can be called periodically or manually.
     """
     try:
+        # Check if services are properly initialized
+        if gmail_service is None:
+            # Return a mock response for testing when Gmail is not set up
+            return {
+                "message": "Email status check completed (Gmail service not configured)",
+                "buildings_checked": 0,
+                "replies_found": 0,
+                "status": "testing_mode"
+            }
+        
         # Get all buildings that have emails sent but no replies yet
         buildings_with_emails = db.query(Building).filter(
             Building.email_sent == True,
@@ -250,6 +356,39 @@ async def check_email_status(db: Session = Depends(get_database)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error checking email status: {str(e)}")
+
+
+@app.get("/test-db")
+async def test_database(db: Session = Depends(get_database)):
+    """Simple database test endpoint."""
+    try:
+        buildings = db.query(Building).all()
+        return {
+            "status": "success",
+            "building_count": len(buildings),
+            "buildings": [f"ID {b.id}: {b.address}" for b in buildings]
+        }
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+
+@app.delete("/api/clear-database")
+async def clear_database(db: Session = Depends(get_database)):
+    """Clear all buildings from database to start fresh."""
+    try:
+        # Delete all buildings
+        deleted_count = db.query(Building).count()
+        db.query(Building).delete()
+        db.commit()
+        
+        return {
+            "status": "success",
+            "message": f"Cleared {deleted_count} buildings from database",
+            "deleted_count": deleted_count
+        }
+    except Exception as e:
+        db.rollback()
+        return {"status": "error", "error": str(e)}
 
 
 if __name__ == "__main__":
