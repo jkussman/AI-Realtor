@@ -17,7 +17,7 @@ import {
   CircularProgress
 } from '@mui/material';
 import { Search as SearchIcon } from '@mui/icons-material';
-import { processBoundingBoxes } from '../utils/api';
+import { processBoundingBoxes, getBuildings, Building } from '../utils/api';
 
 // Fix Leaflet default markers
 delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -67,16 +67,52 @@ const MapPage: React.FC = () => {
     setProcessingStatus('Starting building discovery...');
 
     try {
+      // Get initial building count
+      const initialBuildingsResponse = await getBuildings();
+      const initialCount = initialBuildingsResponse.success && initialBuildingsResponse.data ? initialBuildingsResponse.data.length : 0;
+
       const response = await processBoundingBoxes(boundingBoxes);
 
       if (response.success) {
-        setProcessingStatus(`Processing started: ${response.message}`);
+        setProcessingStatus('Processing buildings...');
         
-        // Poll for status updates (simplified for now)
-        setTimeout(() => {
-          setProcessingStatus('Building discovery completed! Check the Buildings page for results.');
-          setIsProcessing(false);
-        }, 3000);
+        // Start polling for new buildings
+        let attempts = 0;
+        const maxAttempts = 30; // Maximum 30 attempts (30 seconds)
+        const pollInterval = 1000; // Poll every second
+
+        const pollForBuildings = async () => {
+          const buildingsResponse = await getBuildings();
+          
+          if (buildingsResponse.success && buildingsResponse.data) {
+            const currentCount = buildingsResponse.data.length;
+            const newBuildingsCount = currentCount - initialCount;
+            
+            // Check if we have new buildings
+            if (newBuildingsCount > 0) {
+              setProcessingStatus(
+                `Building discovery completed! Found ${newBuildingsCount} new buildings in selected areas. ` +
+                `Total buildings in database: ${currentCount}`
+              );
+              setIsProcessing(false);
+              return;
+            }
+          }
+
+          attempts++;
+          
+          if (attempts >= maxAttempts) {
+            setProcessingStatus('Building discovery timed out. No new buildings were found. Please try a different area.');
+            setIsProcessing(false);
+            return;
+          }
+
+          // Continue polling
+          setTimeout(pollForBuildings, pollInterval);
+        };
+
+        // Start polling
+        pollForBuildings();
       } else {
         setProcessingStatus(`Error: ${response.error}`);
         setIsProcessing(false);

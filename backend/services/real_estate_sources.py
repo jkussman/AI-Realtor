@@ -85,25 +85,21 @@ class RealEstateDataSources:
                 "Content-Type": "application/json"
             }
             
-            # Search by address
             params = {
                 "address": address,
                 "state": "NY"
             }
             
-            # Uncomment when ready to use real API
-            # response = requests.get(
-            #     "https://api.estated.com/v4/property",
-            #     headers=headers,
-            #     params=params
-            # )
-            # 
-            # if response.status_code == 200:
-            #     data = response.json()
-            #     return self._parse_estated_response(data)
+            response = requests.get(
+                "https://api.estated.com/v4/property",
+                headers=headers,
+                params=params
+            )
             
-            # Return mock data for now
-            return await self._mock_estated_data(address)
+            if response.status_code == 200:
+                data = response.json()
+                return self._parse_estated_response(data)
+            return None
             
         except Exception as e:
             print(f"Error getting Estated data: {e}")
@@ -124,25 +120,21 @@ class RealEstateDataSources:
                 "Content-Type": "application/json"
             }
             
-            # Search payload
             payload = {
                 "address": address,
                 "state": "NY"
             }
             
-            # Uncomment when ready to use real API
-            # response = requests.post(
-            #     "https://api.reonomy.com/v1/properties/search",
-            #     headers=headers,
-            #     json=payload
-            # )
-            # 
-            # if response.status_code == 200:
-            #     data = response.json()
-            #     return self._parse_reonomy_response(data)
+            response = requests.post(
+                "https://api.reonomy.com/v1/properties/search",
+                headers=headers,
+                json=payload
+            )
             
-            # Return mock data for now
-            return await self._mock_reonomy_data(address)
+            if response.status_code == 200:
+                data = response.json()
+                return self._parse_reonomy_response(data)
+            return None
             
         except Exception as e:
             print(f"Error getting Reonomy data: {e}")
@@ -155,27 +147,20 @@ class RealEstateDataSources:
         WARNING: Be respectful of rate limits and terms of service.
         """
         try:
-            # For now, return mock data to avoid violating ToS during development
-            return await self._mock_streeteasy_data(address)
+            driver = webdriver.Chrome(options=self.chrome_options)
             
-            # Uncomment and modify when ready for real scraping
-            # driver = webdriver.Chrome(options=self.chrome_options)
-            # 
-            # # Search URL (modify based on actual StreetEasy URL structure)
-            # search_url = f"https://streeteasy.com/search?address={address.replace(' ', '+')}"
-            # driver.get(search_url)
-            # 
-            # # Wait for results to load
-            # WebDriverWait(driver, 10).until(
-            #     EC.presence_of_element_located((By.CLASS_NAME, "search-results"))
-            # )
-            # 
-            # # Extract data
-            # soup = BeautifulSoup(driver.page_source, 'html.parser')
-            # property_data = self._parse_streeteasy_html(soup)
-            # 
-            # driver.quit()
-            # return property_data
+            search_url = f"https://streeteasy.com/search?address={address.replace(' ', '+')}"
+            driver.get(search_url)
+            
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "search-results"))
+            )
+            
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            property_data = self._parse_streeteasy_html(soup)
+            
+            driver.quit()
+            return property_data
             
         except Exception as e:
             print(f"Error scraping StreetEasy: {e}")
@@ -188,8 +173,20 @@ class RealEstateDataSources:
         WARNING: Be respectful of rate limits and terms of service.
         """
         try:
-            # For now, return mock data to avoid violating ToS during development
-            return await self._mock_zillow_data(address)
+            driver = webdriver.Chrome(options=self.chrome_options)
+            
+            search_url = f"https://www.zillow.com/homes/{address.replace(' ', '-')}"
+            driver.get(search_url)
+            
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CLASS_NAME, "property-card"))
+            )
+            
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            property_data = self._parse_zillow_html(soup)
+            
+            driver.quit()
+            return property_data
             
         except Exception as e:
             print(f"Error scraping Zillow: {e}")
@@ -294,19 +291,133 @@ class RealEstateDataSources:
         }
     
     def _parse_estated_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse actual Estated API response."""
-        # TODO: Implement based on actual Estated API response format
-        return {}
+        """Parse Estated API response."""
+        return {
+            'source': 'estated_api',
+            'property_type': data.get('property', {}).get('type'),
+            'building_class': data.get('property', {}).get('class'),
+            'year_built': data.get('property', {}).get('year_built'),
+            'total_units': data.get('property', {}).get('units'),
+            'lot_size_sqft': data.get('property', {}).get('lot_size', {}).get('sq_ft'),
+            'building_sqft': data.get('property', {}).get('building_size', {}).get('sq_ft'),
+            'owner_name': data.get('owner', {}).get('name'),
+            'last_sale_date': data.get('sales', [{}])[0].get('date'),
+            'last_sale_price': data.get('sales', [{}])[0].get('price'),
+            'assessed_value': data.get('assessments', [{}])[0].get('total_value'),
+            'annual_taxes': data.get('taxes', [{}])[0].get('amount')
+        }
     
     def _parse_reonomy_response(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse actual Reonomy API response."""
-        # TODO: Implement based on actual Reonomy API response format
-        return {}
+        """Parse Reonomy API response."""
+        property_data = data.get('properties', [{}])[0]
+        return {
+            'source': 'reonomy_api',
+            'property_manager': property_data.get('property_manager'),
+            'management_company_phone': property_data.get('contact_phone'),
+            'building_amenities': property_data.get('amenities', []),
+            'rent_roll_data': {
+                'avg_rent_per_sqft': property_data.get('avg_rent_per_sqft'),
+                'occupancy_rate': property_data.get('occupancy_rate')
+            }
+        }
     
     def _parse_streeteasy_html(self, soup: BeautifulSoup) -> Dict[str, Any]:
         """Parse StreetEasy HTML content."""
-        # TODO: Implement HTML parsing for StreetEasy
-        return {}
+        data = {}
+        
+        # Extract building name
+        building_name = soup.find('h1', {'class': 'building-title'})
+        if building_name:
+            data['building_name'] = building_name.text.strip()
+            
+        # Extract neighborhood
+        neighborhood = soup.find('div', {'class': 'neighborhood'})
+        if neighborhood:
+            data['neighborhood'] = neighborhood.text.strip()
+            
+        # Extract scores
+        scores = soup.find_all('div', {'class': 'score'})
+        for score in scores:
+            label = score.find('span', {'class': 'label'})
+            value = score.find('span', {'class': 'value'})
+            if label and value:
+                data[f"{label.text.strip().lower()}_score"] = int(value.text.strip())
+                
+        # Extract listings
+        listings = []
+        listing_cards = soup.find_all('div', {'class': 'listing-card'})
+        for card in listing_cards:
+            listing = {}
+            unit = card.find('div', {'class': 'unit'})
+            if unit:
+                listing['unit'] = unit.text.strip()
+            price = card.find('div', {'class': 'price'})
+            if price:
+                listing['rent'] = int(price.text.strip().replace('$', '').replace(',', ''))
+            sqft = card.find('div', {'class': 'sqft'})
+            if sqft:
+                listing['sqft'] = int(sqft.text.strip().replace(' sqft', ''))
+            beds = card.find('div', {'class': 'beds'})
+            if beds:
+                listing['beds'] = int(beds.text.strip().split()[0])
+            baths = card.find('div', {'class': 'baths'})
+            if baths:
+                listing['baths'] = float(baths.text.strip().split()[0])
+            listings.append(listing)
+            
+        data['recent_listings'] = listings
+        data['source'] = 'streeteasy_scrape'
+        return data
+    
+    def _parse_zillow_html(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Parse Zillow HTML content."""
+        data = {
+            'source': 'zillow_scrape'
+        }
+        
+        # Extract Zestimate
+        zestimate = soup.find('div', {'class': 'zestimate'})
+        if zestimate:
+            value = zestimate.find('span', {'class': 'value'})
+            if value:
+                data['zestimate'] = int(value.text.strip().replace('$', '').replace(',', ''))
+                
+        # Extract rent Zestimate
+        rent_zestimate = soup.find('div', {'class': 'rent-zestimate'})
+        if rent_zestimate:
+            value = rent_zestimate.find('span', {'class': 'value'})
+            if value:
+                data['rent_zestimate'] = int(value.text.strip().replace('$', '').replace(',', ''))
+                
+        # Extract price history
+        history = []
+        price_history = soup.find_all('div', {'class': 'price-history-item'})
+        for item in price_history:
+            date = item.find('span', {'class': 'date'})
+            price = item.find('span', {'class': 'price'})
+            if date and price:
+                history.append({
+                    'date': date.text.strip(),
+                    'price': int(price.text.strip().replace('$', '').replace(',', ''))
+                })
+        data['price_history'] = history
+        
+        # Extract nearby schools
+        schools = []
+        school_items = soup.find_all('div', {'class': 'school-item'})
+        for item in school_items:
+            name = item.find('span', {'class': 'name'})
+            rating = item.find('span', {'class': 'rating'})
+            distance = item.find('span', {'class': 'distance'})
+            if name and rating and distance:
+                schools.append({
+                    'name': name.text.strip(),
+                    'rating': int(rating.text.strip()),
+                    'distance': distance.text.strip()
+                })
+        data['schools_nearby'] = schools
+        
+        return data
     
     async def get_property_contacts(self, address: str) -> List[Dict[str, Any]]:
         """

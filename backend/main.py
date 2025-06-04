@@ -9,14 +9,16 @@ from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
 from datetime import datetime
 import os
+import signal
+import sys
+import socket
 from dotenv import load_dotenv
 
 from db.database import get_database, init_database
 from db.models import Building, EmailLog
-# Import the real services instead of using mocks
-# from agents.building_pipeline import BuildingPipeline
+from agents.building_pipeline import BuildingPipeline
 from agents.get_buildings import BuildingFinder
-# from services.gmail_api import GmailService
+from services.gmail_api import GmailService
 
 # Skip service imports that require Google auth for now
 print("⚠️ Skipping Google services initialization for testing")
@@ -44,6 +46,11 @@ app.add_middleware(
 async def startup_event():
     init_database()
 
+# Initialize services
+gmail_service = GmailService()
+building_pipeline = BuildingPipeline()
+building_finder = BuildingFinder()
+
 # Pydantic models for request/response
 class BoundingBox(BaseModel):
     north: float
@@ -61,6 +68,8 @@ class BuildingResponse(BaseModel):
     id: int
     name: Optional[str] = None
     address: str
+    latitude: Optional[str] = None
+    longitude: Optional[str] = None
     building_type: str
     approved: bool
     contact_email: Optional[str] = None
@@ -68,6 +77,30 @@ class BuildingResponse(BaseModel):
     email_sent: bool
     reply_received: bool
     created_at: datetime
+    
+    # Additional building details
+    property_manager: Optional[str] = None
+    number_of_units: Optional[int] = None
+    year_built: Optional[int] = None
+    
+    # New detailed rental information
+    is_coop: bool = False
+    is_mixed_use: bool = False
+    total_apartments: Optional[int] = None
+    two_bedroom_apartments: Optional[int] = None
+    recent_2br_rent: Optional[int] = None
+    rent_range_2br: Optional[str] = None
+    has_laundry: bool = False
+    laundry_type: Optional[str] = None
+    amenities: Optional[List[str]] = None
+    pet_policy: Optional[str] = None
+    building_style: Optional[str] = None
+    management_company: Optional[str] = None
+    contact_info: Optional[str] = None
+    recent_availability: bool = False
+    rental_notes: Optional[str] = None
+    neighborhood: Optional[str] = None
+    stories: Optional[int] = None
     
     class Config:
         from_attributes = True
@@ -115,6 +148,8 @@ class RealisticBuildingPipeline:
                     building = Building(
                         name=building_data.get('name'),
                         address=building_data['address'],
+                        latitude=str(building_data.get('latitude')) if building_data.get('latitude') else None,
+                        longitude=str(building_data.get('longitude')) if building_data.get('longitude') else None,
                         building_type=building_data.get('building_type', 'residential_apartment'),
                         bounding_box=json.dumps(bbox_dict),
                         approved=False,
@@ -123,7 +158,25 @@ class RealisticBuildingPipeline:
                         # Store additional building details as metadata
                         property_manager=building_data.get('property_manager'),
                         number_of_units=building_data.get('estimated_units'),
-                        year_built=building_data.get('year_built')
+                        year_built=building_data.get('year_built'),
+                        # Store new detailed rental information
+                        is_coop=building_data.get('is_coop', False),
+                        is_mixed_use=building_data.get('is_mixed_use', False),
+                        total_apartments=building_data.get('total_apartments'),
+                        two_bedroom_apartments=building_data.get('two_bedroom_apartments'),
+                        recent_2br_rent=building_data.get('recent_2br_rent'),
+                        rent_range_2br=building_data.get('rent_range_2br'),
+                        has_laundry=building_data.get('has_laundry', False),
+                        laundry_type=building_data.get('laundry_type'),
+                        amenities=building_data.get('amenities'),
+                        pet_policy=building_data.get('pet_policy'),
+                        building_style=building_data.get('building_style'),
+                        management_company=building_data.get('management_company'),
+                        contact_info=building_data.get('contact_info'),
+                        recent_availability=building_data.get('recent_availability', False),
+                        rental_notes=building_data.get('rental_notes'),
+                        neighborhood=building_data.get('neighborhood'),
+                        stories=building_data.get('stories')
                     )
                     db.add(building)
                     buildings_created.append(building)
@@ -264,13 +317,37 @@ async def get_buildings(db: Session = Depends(get_database)):
                 "id": building.id,
                 "name": building.name,
                 "address": building.address,
+                "latitude": building.latitude,
+                "longitude": building.longitude,
                 "building_type": building.building_type,
                 "approved": building.approved,
                 "contact_email": building.contact_email,
                 "contact_name": building.contact_name,
                 "email_sent": building.email_sent,
                 "reply_received": building.reply_received,
-                "created_at": building.created_at.isoformat() if building.created_at else None
+                "created_at": building.created_at.isoformat() if building.created_at else None,
+                # Additional building details
+                "property_manager": building.property_manager,
+                "number_of_units": building.number_of_units,
+                "year_built": building.year_built,
+                # New detailed rental information
+                "is_coop": building.is_coop or False,
+                "is_mixed_use": building.is_mixed_use or False,
+                "total_apartments": building.total_apartments,
+                "two_bedroom_apartments": building.two_bedroom_apartments,
+                "recent_2br_rent": building.recent_2br_rent,
+                "rent_range_2br": building.rent_range_2br,
+                "has_laundry": building.has_laundry or False,
+                "laundry_type": building.laundry_type,
+                "amenities": building.amenities or [],
+                "pet_policy": building.pet_policy,
+                "building_style": building.building_style,
+                "management_company": building.management_company,
+                "contact_info": building.contact_info,
+                "recent_availability": building.recent_availability or False,
+                "rental_notes": building.rental_notes,
+                "neighborhood": building.neighborhood,
+                "stories": building.stories
             })
         
         return building_list
@@ -297,6 +374,66 @@ async def get_building(building_id: int, db: Session = Depends(get_database)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching building: {str(e)}")
+
+
+@app.delete("/api/buildings/{building_id}")
+async def delete_building(building_id: int, db: Session = Depends(get_database)):
+    """
+    Delete a specific building from the database.
+    """
+    try:
+        # Get the building
+        building = db.query(Building).filter(Building.id == building_id).first()
+        if not building:
+            raise HTTPException(status_code=404, detail="Building not found")
+        
+        # Store building address for response
+        building_address = building.address
+        
+        # Delete the building
+        db.delete(building)
+        db.commit()
+        
+        return {
+            "message": f"Building deleted successfully",
+            "building_id": building_id,
+            "address": building_address,
+            "status": "deleted"
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting building: {str(e)}")
+
+
+@app.delete("/api/buildings")
+async def delete_all_buildings(db: Session = Depends(get_database)):
+    """
+    Delete all buildings from the database.
+    """
+    try:
+        # Count buildings before deletion
+        building_count = db.query(Building).count()
+        
+        if building_count == 0:
+            return {
+                "message": "No buildings to delete",
+                "deleted_count": 0,
+                "status": "empty"
+            }
+        
+        # Delete all buildings and associated email logs
+        db.query(EmailLog).delete()
+        db.query(Building).delete()
+        db.commit()
+        
+        return {
+            "message": f"Successfully deleted all {building_count} buildings",
+            "deleted_count": building_count,
+            "status": "deleted_all"
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Error deleting all buildings: {str(e)}")
 
 
 @app.post("/api/webhook/email")
@@ -393,4 +530,14 @@ async def clear_database(db: Session = Depends(get_database)):
 
 if __name__ == "__main__":
     import uvicorn
+    
+    def signal_handler(sig, frame):
+        print("\n🛑 Shutting down server gracefully...")
+        os._exit(0)
+    
+    # Register signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    print(f"🚀 Starting AI Realtor API server on port 8000...")
     uvicorn.run(app, host="0.0.0.0", port=8000) 

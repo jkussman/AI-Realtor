@@ -30,17 +30,21 @@ import {
   Email as EmailIcon,
   Refresh as RefreshIcon,
   Info as InfoIcon,
-  Business as BuildingIcon
+  Business as BuildingIcon,
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 
 // Import API functions and types
-import { getBuildings, approveBuilding, Building } from '../utils/api';
+import { getBuildings, approveBuilding, deleteBuilding, deleteAllBuildings, Building } from '../utils/api';
 
 const BuildingsPage: React.FC = () => {
   const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedBuilding, setSelectedBuilding] = useState<Building | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleteAllDialogOpen, setDeleteAllDialogOpen] = useState(false);
+  const [buildingToDelete, setBuildingToDelete] = useState<Building | null>(null);
   const [notification, setNotification] = useState<{
     open: boolean;
     message: string;
@@ -102,6 +106,61 @@ const BuildingsPage: React.FC = () => {
   const handleCloseDetails = () => {
     setSelectedBuilding(null);
     setDetailsOpen(false);
+  };
+
+  const handleDeleteClick = (building: Building) => {
+    setBuildingToDelete(building);
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteCancel = () => {
+    setBuildingToDelete(null);
+    setDeleteDialogOpen(false);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!buildingToDelete) return;
+
+    try {
+      const response = await deleteBuilding(buildingToDelete.id);
+      if (response.success) {
+        showNotification(`Building "${buildingToDelete.address}" deleted successfully!`, 'success');
+        // Refresh buildings list
+        fetchBuildings();
+      } else {
+        showNotification(`Error deleting building: ${response.error}`, 'error');
+      }
+    } catch (error) {
+      showNotification(`Failed to delete building: ${error}`, 'error');
+    } finally {
+      setBuildingToDelete(null);
+      setDeleteDialogOpen(false);
+    }
+  };
+
+  const handleDeleteAllClick = () => {
+    setDeleteAllDialogOpen(true);
+  };
+
+  const handleDeleteAllCancel = () => {
+    setDeleteAllDialogOpen(false);
+  };
+
+  const handleDeleteAllConfirm = async () => {
+    try {
+      const response = await deleteAllBuildings();
+      if (response.success) {
+        showNotification(response.data?.message || 'All buildings deleted successfully!', 'success');
+        // Refresh buildings list
+        fetchBuildings();
+      } else {
+        showNotification(`Error deleting all buildings: ${response.error}`, 'error');
+      }
+    } catch (error) {
+      showNotification(`Failed to delete all buildings: ${error}`, 'error');
+    } finally {
+      setDeleteAllDialogOpen(false);
+    }
   };
 
   const getStatusChip = (building: Building) => {
@@ -197,6 +256,17 @@ const BuildingsPage: React.FC = () => {
           >
             Refresh
           </Button>
+          {buildings.length > 0 && (
+            <Button
+              variant="outlined"
+              color="error"
+              startIcon={<DeleteIcon />}
+              onClick={handleDeleteAllClick}
+              disabled={loading}
+            >
+              Delete All Buildings
+            </Button>
+          )}
         </Box>
       </Box>
 
@@ -225,8 +295,11 @@ const BuildingsPage: React.FC = () => {
                 <TableCell>Address</TableCell>
                 <TableCell>Building Name</TableCell>
                 <TableCell>Type</TableCell>
+                <TableCell>Co-op/Mixed Use</TableCell>
+                <TableCell>Apartments</TableCell>
+                <TableCell>2BR Info</TableCell>
+                <TableCell>Amenities</TableCell>
                 <TableCell>Status</TableCell>
-                <TableCell>Contact</TableCell>
                 <TableCell>Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -237,6 +310,11 @@ const BuildingsPage: React.FC = () => {
                     <Typography variant="body2" fontWeight="medium">
                       {building.address}
                     </Typography>
+                    {building.neighborhood && (
+                      <Typography variant="caption" color="text.secondary">
+                        {building.neighborhood}
+                      </Typography>
+                    )}
                   </TableCell>
                   <TableCell>
                     {building.name || (
@@ -252,24 +330,76 @@ const BuildingsPage: React.FC = () => {
                       size="small"
                       icon={<BuildingIcon />}
                     />
+                    {building.year_built && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        Built {building.year_built}
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Box>
+                      {building.is_coop && (
+                        <Chip label="Co-op" size="small" color="primary" sx={{ mr: 0.5, mb: 0.5 }} />
+                      )}
+                      {building.is_mixed_use && (
+                        <Chip label="Mixed Use" size="small" color="secondary" sx={{ mr: 0.5, mb: 0.5 }} />
+                      )}
+                      {!building.is_coop && !building.is_mixed_use && (
+                        <Typography variant="body2" color="text.secondary">
+                          Rental
+                        </Typography>
+                      )}
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2">
+                      {building.total_apartments ? `${building.total_apartments} total` : 'Unknown'}
+                    </Typography>
+                    {building.stories && (
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {building.stories} stories
+                      </Typography>
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    <Box>
+                      {building.two_bedroom_apartments ? (
+                        <Typography variant="body2">
+                          {building.two_bedroom_apartments} 2BR units
+                        </Typography>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          No 2BR info
+                        </Typography>
+                      )}
+                      {building.recent_2br_rent && (
+                        <Typography variant="caption" color="success.main" display="block">
+                          ${building.recent_2br_rent.toLocaleString()}/mo
+                        </Typography>
+                      )}
+                      {building.rent_range_2br && !building.recent_2br_rent && (
+                        <Typography variant="caption" color="success.main" display="block">
+                          {building.rent_range_2br}
+                        </Typography>
+                      )}
+                    </Box>
+                  </TableCell>
+                  <TableCell>
+                    <Box>
+                      {building.has_laundry && (
+                        <Chip label="Laundry" size="small" sx={{ mr: 0.5, mb: 0.5 }} />
+                      )}
+                      {building.amenities && building.amenities.length > 0 && (
+                        <Typography variant="caption" color="text.secondary">
+                          +{building.amenities.length} amenities
+                        </Typography>
+                      )}
+                    </Box>
                   </TableCell>
                   <TableCell>
                     {getStatusChip(building)}
-                  </TableCell>
-                  <TableCell>
-                    {building.contact_email ? (
-                      <Box>
-                        <Typography variant="body2">
-                          {building.contact_name || 'Unknown'}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {building.contact_email}
-                        </Typography>
-                      </Box>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary" fontStyle="italic">
-                        No contact found
-                      </Typography>
+                    {building.recent_availability && (
+                      <Chip label="Available" size="small" color="success" sx={{ ml: 0.5 }} />
                     )}
                   </TableCell>
                   <TableCell>
@@ -303,6 +433,15 @@ const BuildingsPage: React.FC = () => {
                           <EmailIcon />
                         </IconButton>
                       )}
+
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => handleDeleteClick(building)}
+                        title="Delete Building"
+                      >
+                        <DeleteIcon />
+                      </IconButton>
                     </Box>
                   </TableCell>
                 </TableRow>
@@ -312,23 +451,93 @@ const BuildingsPage: React.FC = () => {
         </TableContainer>
       )}
 
-      {/* Building Details Dialog */}
-      <Dialog open={detailsOpen} onClose={handleCloseDetails} maxWidth="md" fullWidth>
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteDialogOpen} onClose={handleDeleteCancel}>
         <DialogTitle>
-          Building Details
+          <Typography variant="h6" color="error">
+            Delete Building
+          </Typography>
+        </DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" gutterBottom>
+            Are you sure you want to do this? It will be deleted forever.
+          </Typography>
+          {buildingToDelete && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'grey.100', borderRadius: 1 }}>
+              <Typography variant="body2" fontWeight="medium">
+                Building to delete:
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                {buildingToDelete.address}
+              </Typography>
+              {buildingToDelete.name && (
+                <Typography variant="body2" color="text.secondary">
+                  {buildingToDelete.name}
+                </Typography>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteCancel} color="primary">
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleDeleteConfirm} 
+            color="error" 
+            variant="contained"
+            startIcon={<DeleteIcon />}
+          >
+            Delete Forever
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete All Confirmation Dialog */}
+      <Dialog open={deleteAllDialogOpen} onClose={handleDeleteAllCancel}>
+        <DialogTitle>
+          Delete All Buildings
+        </DialogTitle>
+        <DialogContent>
+          <Typography>
+            Are you sure you want to do this? All {buildings.length} buildings will be deleted forever.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleDeleteAllCancel} color="primary">
+            Cancel
+          </Button>
+          <Button 
+            onClick={handleDeleteAllConfirm} 
+            color="error" 
+            variant="contained"
+            startIcon={<DeleteIcon />}
+          >
+            Delete All Forever
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Building Details Dialog */}
+      <Dialog open={detailsOpen} onClose={handleCloseDetails} maxWidth="lg" fullWidth>
+        <DialogTitle>
+          <Typography variant="h5">Building Details</Typography>
+          {selectedBuilding && (
+            <Typography variant="subtitle1" color="text.secondary">
+              {selectedBuilding.address}
+            </Typography>
+          )}
         </DialogTitle>
         <DialogContent>
           {selectedBuilding && (
-            <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12} sm={6}>
-                <TextField
-                  label="Address"
-                  value={selectedBuilding.address}
-                  fullWidth
-                  InputProps={{ readOnly: true }}
-                />
+            <Grid container spacing={3} sx={{ mt: 1 }}>
+              {/* Basic Information */}
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom color="primary">
+                  Basic Information
+                </Typography>
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={6} md={4}>
                 <TextField
                   label="Building Name"
                   value={selectedBuilding.name || 'Not available'}
@@ -336,7 +545,23 @@ const BuildingsPage: React.FC = () => {
                   InputProps={{ readOnly: true }}
                 />
               </Grid>
-              <Grid item xs={12} sm={6}>
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  label="Neighborhood"
+                  value={selectedBuilding.neighborhood || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  label="Year Built"
+                  value={selectedBuilding.year_built || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
                 <TextField
                   label="Building Type"
                   value={selectedBuilding.building_type}
@@ -344,23 +569,187 @@ const BuildingsPage: React.FC = () => {
                   InputProps={{ readOnly: true }}
                 />
               </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  label="Building Style"
+                  value={selectedBuilding.building_style || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  label="Stories"
+                  value={selectedBuilding.stories || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+
+              {/* Building Classification */}
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom color="primary">
+                  Building Classification
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {selectedBuilding.is_coop && (
+                    <Chip label="Co-op" color="primary" />
+                  )}
+                  {selectedBuilding.is_mixed_use && (
+                    <Chip label="Mixed Use" color="secondary" />
+                  )}
+                  {!selectedBuilding.is_coop && !selectedBuilding.is_mixed_use && (
+                    <Chip label="Rental Building" color="default" />
+                  )}
+                  {selectedBuilding.recent_availability && (
+                    <Chip label="Currently Available" color="success" />
+                  )}
+                </Box>
+              </Grid>
+
+              {/* Apartment Information */}
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom color="primary">
+                  Apartment Information
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  label="Total Apartments"
+                  value={selectedBuilding.total_apartments || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  label="2-Bedroom Apartments"
+                  value={selectedBuilding.two_bedroom_apartments || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={4}>
+                <TextField
+                  label="Recent 2BR Rent"
+                  value={selectedBuilding.recent_2br_rent ? `$${selectedBuilding.recent_2br_rent.toLocaleString()}/month` : 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              {selectedBuilding.rent_range_2br && (
+                <Grid item xs={12} sm={6}>
+                  <TextField
+                    label="2BR Rent Range"
+                    value={selectedBuilding.rent_range_2br}
+                    fullWidth
+                    InputProps={{ readOnly: true }}
+                  />
+                </Grid>
+              )}
+
+              {/* Amenities & Features */}
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom color="primary">
+                  Amenities & Features
+                </Typography>
+              </Grid>
               <Grid item xs={12} sm={6}>
                 <TextField
-                  label="Contact Name"
-                  value={selectedBuilding.contact_name || 'Not available'}
+                  label="Laundry Facilities"
+                  value={selectedBuilding.has_laundry ? 
+                    (selectedBuilding.laundry_type ? 
+                      selectedBuilding.laundry_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : 
+                      'Available') : 
+                    'Not available'}
                   fullWidth
                   InputProps={{ readOnly: true }}
                 />
               </Grid>
-              <Grid item xs={12}>
+              <Grid item xs={12} sm={6}>
                 <TextField
-                  label="Contact Email"
-                  value={selectedBuilding.contact_email || 'Not available'}
+                  label="Pet Policy"
+                  value={selectedBuilding.pet_policy ? 
+                    selectedBuilding.pet_policy.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : 
+                    'Not available'}
                   fullWidth
                   InputProps={{ readOnly: true }}
                 />
               </Grid>
-              <Grid item xs={12} sm={4}>
+              {selectedBuilding.amenities && selectedBuilding.amenities.length > 0 && (
+                <Grid item xs={12}>
+                  <Typography variant="body2" gutterBottom>
+                    Building Amenities:
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                    {selectedBuilding.amenities.map((amenity, index) => (
+                      <Chip key={index} label={amenity} size="small" variant="outlined" />
+                    ))}
+                  </Box>
+                </Grid>
+              )}
+
+              {/* Management & Contact */}
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom color="primary">
+                  Management & Contact Information
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Management Company"
+                  value={selectedBuilding.management_company || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Contact Information"
+                  value={selectedBuilding.contact_info || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Property Manager"
+                  value={selectedBuilding.property_manager || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+
+              {/* Additional Notes */}
+              {selectedBuilding.rental_notes && (
+                <>
+                  <Grid item xs={12}>
+                    <Typography variant="h6" gutterBottom color="primary">
+                      Additional Rental Information
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12}>
+                    <TextField
+                      label="Rental Notes"
+                      value={selectedBuilding.rental_notes}
+                      fullWidth
+                      multiline
+                      rows={3}
+                      InputProps={{ readOnly: true }}
+                    />
+                  </Grid>
+                </>
+              )}
+
+              {/* System Information */}
+              <Grid item xs={12}>
+                <Typography variant="h6" gutterBottom color="primary">
+                  System Information
+                </Typography>
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
                 <TextField
                   label="Approved"
                   value={selectedBuilding.approved ? 'Yes' : 'No'}
@@ -368,7 +757,7 @@ const BuildingsPage: React.FC = () => {
                   InputProps={{ readOnly: true }}
                 />
               </Grid>
-              <Grid item xs={12} sm={4}>
+              <Grid item xs={12} sm={6} md={3}>
                 <TextField
                   label="Email Sent"
                   value={selectedBuilding.email_sent ? 'Yes' : 'No'}
@@ -376,10 +765,18 @@ const BuildingsPage: React.FC = () => {
                   InputProps={{ readOnly: true }}
                 />
               </Grid>
-              <Grid item xs={12} sm={4}>
+              <Grid item xs={12} sm={6} md={3}>
                 <TextField
                   label="Reply Received"
                   value={selectedBuilding.reply_received ? 'Yes' : 'No'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6} md={3}>
+                <TextField
+                  label="Contact Email"
+                  value={selectedBuilding.contact_email || 'Not available'}
                   fullWidth
                   InputProps={{ readOnly: true }}
                 />

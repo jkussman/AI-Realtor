@@ -10,7 +10,7 @@ In the `backend` directory, create a new file called `.env` (with a dot at the b
 # AI Realtor Environment Configuration
 
 # OpenAI API (Required for AI building analysis)
-OPENAI_API_KEY=your_openai_api_key_here
+# OPENAI_API_KEY=your_openai_api_key_here
 
 # Database 
 DATABASE_URL=sqlite:///./ai_realtor.db

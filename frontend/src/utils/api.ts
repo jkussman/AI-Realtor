@@ -22,6 +22,30 @@ export interface Building {
   email_sent: boolean;
   reply_received: boolean;
   created_at: string;
+  
+  // Additional building details  
+  property_manager?: string;
+  number_of_units?: number;
+  year_built?: number;
+  
+  // New detailed rental information
+  is_coop: boolean;
+  is_mixed_use: boolean;
+  total_apartments?: number;
+  two_bedroom_apartments?: number;
+  recent_2br_rent?: number;
+  rent_range_2br?: string;
+  has_laundry: boolean;
+  laundry_type?: string;
+  amenities?: string[];
+  pet_policy?: string;
+  building_style?: string;
+  management_company?: string;
+  contact_info?: string;
+  recent_availability: boolean;
+  rental_notes?: string;
+  neighborhood?: string;
+  stories?: number;
 }
 
 export interface ApiResponse<T = any> {
@@ -152,6 +176,46 @@ export const approveBuilding = async (buildingId: number): Promise<ApiResponse> 
 };
 
 /**
+ * Delete a specific building by ID
+ */
+export const deleteBuilding = async (buildingId: number): Promise<ApiResponse> => {
+  try {
+    const response = await axios.delete(`${API_BASE_URL}/buildings/${buildingId}`);
+    
+    return {
+      success: true,
+      data: response.data,
+      message: response.data.message
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.response?.data?.detail || error.message || 'Failed to delete building'
+    };
+  }
+};
+
+/**
+ * Delete all buildings
+ */
+export const deleteAllBuildings = async (): Promise<ApiResponse> => {
+  try {
+    const response = await axios.delete(`${API_BASE_URL}/buildings`);
+    
+    return {
+      success: true,
+      data: response.data,
+      message: response.data.message
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      error: error.response?.data?.detail || error.message || 'Failed to delete all buildings'
+    };
+  }
+};
+
+/**
  * Check email status
  */
 export const checkEmailStatus = async (): Promise<ApiResponse> => {
@@ -224,6 +288,8 @@ export default {
   getBuildings,
   getBuilding,
   approveBuilding,
+  deleteBuilding,
+  deleteAllBuildings,
   checkEmailStatus,
   testConnection,
   handleApiError,

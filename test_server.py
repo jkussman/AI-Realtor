@@ -1,8 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 from typing import List
 import uvicorn
+from datetime import datetime
+
+from db.database import get_database
+from db.models import Building, EmailLog
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -25,32 +30,23 @@ def root():
     return {"message": "Test API is working!"}
 
 @app.get("/api/buildings")
-def get_buildings():
+async def get_buildings(db: Session = Depends(get_database)):
+    """Return all buildings from the database."""
+    buildings = db.query(Building).all()
     return [
         {
-            "id": 1, 
-            "address": "123 Test Street", 
-            "approved": False, 
-            "name": "Test Building 1",
-            "building_type": "Commercial",
-            "contact_email": "test1@example.com",
-            "contact_name": "John Doe",
-            "email_sent": False,
-            "reply_received": False,
-            "created_at": "2024-01-01T00:00:00Z"
-        },
-        {
-            "id": 2, 
-            "address": "456 Demo Ave", 
-            "approved": True, 
-            "name": "Test Building 2",
-            "building_type": "Residential",
-            "contact_email": "test2@example.com",
-            "contact_name": "Jane Smith",
-            "email_sent": True,
-            "reply_received": False,
-            "created_at": "2024-01-02T00:00:00Z"
+            "id": building.id,
+            "address": building.address,
+            "approved": building.approved,
+            "name": building.name,
+            "building_type": building.building_type,
+            "contact_email": building.contact_email,
+            "contact_name": building.contact_name,
+            "email_sent": building.email_sent,
+            "reply_received": building.reply_received,
+            "created_at": building.created_at.isoformat()
         }
+        for building in buildings
     ]
 
 @app.get("/api/buildings/{building_id}")
@@ -77,11 +73,15 @@ def approve_building(request: ApproveRequest):
     }
 
 @app.get("/api/email-status")
-def email_status():
+async def email_status(db: Session = Depends(get_database)):
+    """Return email service status and counts."""
+    pending_emails = db.query(EmailLog).filter(EmailLog.sent == False).count()
+    sent_emails = db.query(EmailLog).filter(EmailLog.sent == True).count()
+    
     return {
         "message": "Email service is operational",
-        "pending_emails": 3,
-        "sent_emails": 5,
+        "pending_emails": pending_emails,
+        "sent_emails": sent_emails,
         "success": True
     }
 

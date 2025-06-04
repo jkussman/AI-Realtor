@@ -11,26 +11,17 @@ from langchain.llms import OpenAI
 from langchain.prompts import PromptTemplate
 from bs4 import BeautifulSoup
 import os
+import json
 
 
 class ContactFinder:
     """
-    Agent responsible for finding contact information for building managers,
-    property managers, and real estate contacts.
+    Class for finding property management contacts through various methods.
     """
     
-    def __init__(self):
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
-        self.serpapi_key = os.getenv("SERPAPI_API_KEY")
-        
-        # Initialize LangChain LLM if API key is available
-        if self.openai_api_key:
-            self.llm = OpenAI(
-                openai_api_key=self.openai_api_key,
-                temperature=0.1
-            )
-        else:
-            self.llm = None
+    def __init__(self, serpapi_key: str = None, llm=None):
+        self.serpapi_key = serpapi_key
+        self.llm = llm
     
     async def find_contact_for_building(self, building) -> Optional[Dict[str, Any]]:
         """
@@ -158,7 +149,7 @@ class ContactFinder:
         """
         try:
             if not self.llm:
-                return await self._mock_contact_generation(building)
+                return None
             
             prompt_template = PromptTemplate(
                 input_variables=["building_address", "building_name"],
@@ -184,13 +175,14 @@ class ContactFinder:
             )
             
             response = self.llm(prompt)
-            
-            # For now, return mock data since AI parsing is complex
-            return await self._mock_contact_generation(building)
+            try:
+                return json.loads(response)
+            except:
+                return None
             
         except Exception as e:
             print(f"Error in AI contact generation: {e}")
-            return await self._mock_contact_generation(building)
+            return None
     
     async def _web_search(self, query: str) -> List[Dict[str, Any]]:
         """
@@ -199,12 +191,11 @@ class ContactFinder:
         try:
             if self.serpapi_key:
                 return await self._serpapi_search(query)
-            else:
-                return await self._mock_search_results(query)
+            return []
                 
         except Exception as e:
             print(f"Error in web search: {e}")
-            return await self._mock_search_results(query)
+            return []
     
     async def _serpapi_search(self, query: str) -> List[Dict[str, Any]]:
         """
@@ -218,37 +209,32 @@ class ContactFinder:
                 "num": 10
             }
             
-            # response = requests.get("https://serpapi.com/search", params=params)
-            # results = response.json()
-            
-            # For now, return mock results
-            return await self._mock_search_results(query)
+            response = requests.get("https://serpapi.com/search", params=params)
+            if response.status_code == 200:
+                results = response.json()
+                return self._parse_serpapi_results(results)
+            return []
             
         except Exception as e:
             print(f"Error with SerpAPI: {e}")
-            return await self._mock_search_results(query)
-    
-    async def _mock_search_results(self, query: str) -> List[Dict[str, Any]]:
+            return []
+            
+    def _parse_serpapi_results(self, results: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
-        Generate mock search results for development.
+        Parse SerpAPI search results.
         """
-        # Simulate search delay
-        await asyncio.sleep(0.5)
+        parsed_results = []
+        organic_results = results.get('organic_results', [])
         
-        mock_results = [
-            {
-                "title": "Property Management Contact",
-                "snippet": "Contact our leasing office at info@mockproperty.com or call 212-555-0123",
-                "url": "https://mockproperty.com/contact"
-            },
-            {
-                "title": "Building Management Services",
-                "snippet": "Professional property management. Email: manager@buildingservices.com",
-                "url": "https://buildingservices.com"
+        for result in organic_results:
+            parsed_result = {
+                "title": result.get('title'),
+                "snippet": result.get('snippet'),
+                "url": result.get('link')
             }
-        ]
-        
-        return mock_results
+            parsed_results.append(parsed_result)
+            
+        return parsed_results
     
     def _extract_contact_from_results(self, search_results: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """
@@ -312,37 +298,4 @@ class ContactFinder:
             if title.lower() in text_lower:
                 return title
         
-        return None
-    
-    async def _mock_contact_generation(self, building) -> Optional[Dict[str, Any]]:
-        """
-        Generate mock contact information for development.
-        """
-        # Simulate processing delay
-        await asyncio.sleep(1)
-        
-        # Generate realistic but fake contact information
-        management_companies = [
-            "NYC Property Management", "Manhattan Residential", "Metro Building Services",
-            "Empire Property Group", "Hudson Management", "Brooklyn Heights Realty"
-        ]
-        
-        first_names = ["John", "Sarah", "Michael", "Jennifer", "David", "Lisa"]
-        last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia"]
-        
-        company = random.choice(management_companies)
-        first_name = random.choice(first_names)
-        last_name = random.choice(last_names)
-        
-        # Generate email based on company name
-        company_domain = company.lower().replace(" ", "").replace("property", "prop")
-        email = f"{first_name.lower()}.{last_name.lower()}@{company_domain}.com"
-        
-        return {
-            'email': email,
-            'name': f"{first_name} {last_name}",
-            'title': 'Property Manager',
-            'property_manager': company,
-            'source': 'mock_generation',
-            'confidence': 50
-        } 
+        return None 

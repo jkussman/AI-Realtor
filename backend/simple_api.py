@@ -4,8 +4,14 @@ Simple API server for frontend testing.
 This bypasses all the complex dependencies and just serves the frontend.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from typing import List
+from datetime import datetime
+
+from db.database import get_database
+from db.models import Building
 
 # Create simple FastAPI app
 app = FastAPI(title="AI Realtor API - Simple Mode")
@@ -24,62 +30,64 @@ async def root():
     return {"message": "AI Realtor API is running (Simple Mode)"}
 
 @app.get("/buildings")
-async def get_buildings():
-    """Return test buildings for frontend."""
+async def get_buildings(db: Session = Depends(get_database)):
+    """Return all buildings from the database."""
+    buildings = db.query(Building).all()
     return [
         {
-            "id": 1,
-            "name": "Central Park West Apartments",
-            "address": "123 Central Park West, New York, NY",
-            "building_type": "residential_apartment",
-            "approved": False,
-            "contact_email": None,
-            "contact_name": None,
-            "email_sent": False,
-            "reply_received": False,
-            "created_at": "2024-06-01T12:00:00Z"
-        },
-        {
-            "id": 2,
-            "name": "Broadway Heights",
-            "address": "456 Broadway, New York, NY",
-            "building_type": "residential_apartment", 
-            "approved": True,
-            "contact_email": "manager@broadwayheights.com",
-            "contact_name": "Sarah Johnson",
-            "email_sent": True,
-            "reply_received": False,
-            "created_at": "2024-06-01T13:00:00Z"
-        },
-        {
-            "id": 3,
-            "name": "Madison Square Residences",
-            "address": "789 Madison Avenue, New York, NY",
-            "building_type": "residential_apartment",
-            "approved": True,
-            "contact_email": "info@madisonsquare.com",
-            "contact_name": "Mike Chen",
-            "email_sent": True,
-            "reply_received": True,
-            "created_at": "2024-06-01T14:00:00Z"
+            "id": building.id,
+            "name": building.name,
+            "address": building.address,
+            "building_type": building.building_type,
+            "approved": building.approved,
+            "contact_email": building.contact_email,
+            "contact_name": building.contact_name,
+            "email_sent": building.email_sent,
+            "reply_received": building.reply_received,
+            "created_at": building.created_at.isoformat()
         }
+        for building in buildings
     ]
 
 @app.post("/process-bbox")
-async def process_bounding_boxes(request: dict):
-    """Mock building discovery for frontend testing."""
+async def process_bounding_boxes(request: dict, db: Session = Depends(get_database)):
+    """Process bounding boxes and discover buildings."""
+    from agents.building_pipeline import BuildingPipeline
+    
+    pipeline = BuildingPipeline()
+    bounding_boxes = request.get("bounding_boxes", [])
+    
+    # Start the building discovery process
+    await pipeline.process_bounding_boxes(bounding_boxes, db)
+    
     return {
-        "message": "Building discovery started (Demo Mode)",
+        "message": "Building discovery started",
         "status": "processing",
-        "bounding_boxes_count": len(request.get("bounding_boxes", []))
+        "bounding_boxes_count": len(bounding_boxes)
     }
 
 @app.post("/approve-building")
-async def approve_building(request: dict):
-    """Mock building approval for frontend testing."""
+async def approve_building(request: dict, db: Session = Depends(get_database)):
+    """Approve a building and start contact discovery process."""
+    building_id = request.get("building_id")
+    if not building_id:
+        return {"error": "building_id is required"}
+        
+    building = db.query(Building).filter(Building.id == building_id).first()
+    if not building:
+        return {"error": "Building not found"}
+        
+    building.approved = True
+    db.commit()
+    
+    # Start the contact discovery process
+    from agents.building_pipeline import BuildingPipeline
+    pipeline = BuildingPipeline()
+    await pipeline.process_approved_building(building_id, db)
+    
     return {
-        "message": "Building approved (Demo Mode)",
-        "building_id": request.get("building_id"),
+        "message": "Building approved",
+        "building_id": building_id,
         "status": "processing"
     }
 

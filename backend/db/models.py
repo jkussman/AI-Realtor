@@ -18,6 +18,8 @@ class Building(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=True)  # Building name if available
     address = Column(String, nullable=False)
+    latitude = Column(String, nullable=True)  # Building latitude
+    longitude = Column(String, nullable=True)  # Building longitude
     building_type = Column(String, nullable=False)  # e.g., "residential_apartment"
     bounding_box = Column(JSON, nullable=False)  # Store bbox coordinates as JSON
     approved = Column(Boolean, default=False)
@@ -28,11 +30,30 @@ class Building(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Additional enrichment fields
+    # Basic building info
     property_manager = Column(String, nullable=True)
     number_of_units = Column(Integer, nullable=True)
     year_built = Column(Integer, nullable=True)
     square_footage = Column(Integer, nullable=True)
+    
+    # New detailed rental information fields
+    is_coop = Column(Boolean, default=False)
+    is_mixed_use = Column(Boolean, default=False)
+    total_apartments = Column(Integer, nullable=True)
+    two_bedroom_apartments = Column(Integer, nullable=True)
+    recent_2br_rent = Column(Integer, nullable=True)  # Dollar amount
+    rent_range_2br = Column(String, nullable=True)  # e.g. "$3000-4500"
+    has_laundry = Column(Boolean, default=False)
+    laundry_type = Column(String, nullable=True)  # in_unit, in_building, coin_operated, none, unknown
+    amenities = Column(JSON, nullable=True)  # Array of amenities
+    pet_policy = Column(String, nullable=True)  # allowed, no_pets, cats_only, dogs_allowed, unknown
+    building_style = Column(String, nullable=True)  # pre_war, post_war, modern, luxury, affordable
+    management_company = Column(String, nullable=True)
+    contact_info = Column(String, nullable=True)  # Publicly available contact info
+    recent_availability = Column(Boolean, default=False)
+    rental_notes = Column(Text, nullable=True)  # Additional rental information
+    neighborhood = Column(String, nullable=True)
+    stories = Column(Integer, nullable=True)
     
     # Relationship to email logs
     email_logs = relationship("EmailLog", back_populates="building")
