@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { MapContainer, TileLayer, FeatureGroup } from 'react-leaflet';
 import { EditControl } from 'react-leaflet-draw';
 import L from 'leaflet';
@@ -41,7 +41,47 @@ interface BoundingBox {
 const MapPage: React.FC = () => {
   const [boundingBoxes, setBoundingBoxes] = useState<BoundingBox[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [processingStatus, setProcessingStatus] = useState<string>('');
+  const [processingStatus, setProcessingStatus] = useState('');
+  const [initialCount, setInitialCount] = useState(0);
+  const [shouldPoll, setShouldPoll] = useState(false);
+
+  // Polling effect
+  useEffect(() => {
+    if (!shouldPoll) return;
+
+    let attempts = 0;
+    const maxAttempts = 30;
+    const pollInterval = 1000;
+
+    const pollingInterval = setInterval(async () => {
+      const buildingsResponse = await getBuildings();
+      
+      if (buildingsResponse.success && buildingsResponse.data) {
+        const currentCount = buildingsResponse.data.length;
+        const newBuildingsCount = currentCount - initialCount;
+        
+        if (newBuildingsCount > 0) {
+          setProcessingStatus(
+            `Building discovery completed! Found ${newBuildingsCount} new buildings in selected areas. ` +
+            `Total buildings in database: ${currentCount}`
+          );
+          setIsProcessing(false);
+          setShouldPoll(false);
+          return;
+        }
+      }
+
+      attempts++;
+      
+      if (attempts >= maxAttempts) {
+        setProcessingStatus('Building discovery timed out. No new buildings were found. Please try a different area.');
+        setIsProcessing(false);
+        setShouldPoll(false);
+      }
+    }, pollInterval);
+
+    return () => clearInterval(pollingInterval);
+  }, [shouldPoll, initialCount]);
 
   const handleCreated = useCallback((e: any) => {
     const { layer } = e;
@@ -58,69 +98,29 @@ const MapPage: React.FC = () => {
   }, []);
 
   const handleProcessBoundingBoxes = async () => {
-    if (boundingBoxes.length === 0) {
-      alert('Please draw at least one bounding box on the map');
+    if (!boundingBoxes.length) {
+      setProcessingStatus('Please draw at least one bounding box on the map.');
       return;
     }
 
     setIsProcessing(true);
-    setProcessingStatus('Starting building discovery...');
-
     try {
       // Get initial building count
       const initialBuildingsResponse = await getBuildings();
-      const initialCount = initialBuildingsResponse.success && initialBuildingsResponse.data ? initialBuildingsResponse.data.length : 0;
+      const count = initialBuildingsResponse.success && initialBuildingsResponse.data ? initialBuildingsResponse.data.length : 0;
+      setInitialCount(count);
 
       const response = await processBoundingBoxes(boundingBoxes);
 
       if (response.success) {
         setProcessingStatus('Processing buildings...');
-        
-        // Start polling for new buildings
-        let attempts = 0;
-        const maxAttempts = 30; // Maximum 30 attempts (30 seconds)
-        const pollInterval = 1000; // Poll every second
-
-        const pollForBuildings = async () => {
-          const buildingsResponse = await getBuildings();
-          
-          if (buildingsResponse.success && buildingsResponse.data) {
-            const currentCount = buildingsResponse.data.length;
-            const newBuildingsCount = currentCount - initialCount;
-            
-            // Check if we have new buildings
-            if (newBuildingsCount > 0) {
-              setProcessingStatus(
-                `Building discovery completed! Found ${newBuildingsCount} new buildings in selected areas. ` +
-                `Total buildings in database: ${currentCount}`
-              );
-              setIsProcessing(false);
-              return;
-            }
-          }
-
-          attempts++;
-          
-          if (attempts >= maxAttempts) {
-            setProcessingStatus('Building discovery timed out. No new buildings were found. Please try a different area.');
-            setIsProcessing(false);
-            return;
-          }
-
-          // Continue polling
-          setTimeout(pollForBuildings, pollInterval);
-        };
-
-        // Start polling
-        pollForBuildings();
+        setShouldPoll(true);
       } else {
         setProcessingStatus(`Error: ${response.error}`);
         setIsProcessing(false);
       }
-
     } catch (error) {
-      console.error('Error processing bounding boxes:', error);
-      setProcessingStatus('Error processing bounding boxes. Please try again.');
+      setProcessingStatus(`Error: ${error}`);
       setIsProcessing(false);
     }
   };

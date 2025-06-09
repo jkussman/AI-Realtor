@@ -12,16 +12,52 @@ from langchain_openai import OpenAI
 from langchain_core.prompts import PromptTemplate
 import os
 import json
+from datetime import datetime
 
 
 class ContactFinder:
     """
-    Class for finding property management contacts through various methods.
+    Agent responsible for finding contact information for buildings.
+    Uses web search and AI to find property manager contact details.
     """
     
     def __init__(self, serpapi_key: str = None, llm=None):
-        self.serpapi_key = serpapi_key
+        self.serpapi_key = serpapi_key or os.getenv("SERPAPI_API_KEY")
         self.llm = llm
+        if not self.llm and os.getenv("OPENAI_API_KEY"):
+            self.llm = OpenAI(
+                api_key=os.getenv("OPENAI_API_KEY"),
+                temperature=0.1
+            )
+        
+        self.verify_prompt = PromptTemplate(
+            input_variables=["building_info", "contact_info"],
+            template="""You are an expert at verifying real estate contact information.
+            Given the following building information and potential contact details, analyze the likelihood that this contact information is correct.
+            
+            Building Information:
+            {building_info}
+            
+            Contact Information Found:
+            {contact_info}
+            
+            Please analyze this information and provide a response in the following JSON format:
+            {{
+                "confidence_score": <number between 1-10>,
+                "verification_notes": "<explanation of your confidence score>",
+                "verification_flags": ["list", "of", "potential", "issues"],
+                "contact_verified": <true/false based on if confidence > 7>
+            }}
+            
+            Base your confidence score on factors like:
+            - Match between contact title/role and building type
+            - Professional email domain vs personal email
+            - Consistency with building management company
+            - Presence in professional directories
+            - Recent verification dates
+            
+            Respond only with the JSON object, no other text."""
+        )
     
     async def find_contact_for_building(self, building) -> Optional[Dict[str, Any]]:
         """
@@ -53,7 +89,51 @@ class ContactFinder:
             # Strategy 4: Use AI to generate likely contacts
             contact_info = await self._ai_generate_contacts(building)
         
+        if contact_info:
+            # Verify and score the contact information
+            verified_info = await self._verify_contact_info(building, contact_info)
+            if verified_info:
+                return {
+                    **contact_info,
+                    **verified_info
+                }
+        
         return contact_info
+    
+    async def _verify_contact_info(self, building, contact_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Use OpenAI to verify contact information and assign confidence scores.
+        """
+        try:
+            # Prepare building info for the prompt
+            building_info = {
+                "name": building.name,
+                "address": building.address,
+                "type": building.building_type,
+                "management_company": building.management_company,
+                "total_units": building.total_apartments
+            }
+            
+            # Get verification from OpenAI
+            response = await self.llm.ainvoke(
+                self.verify_prompt.format(
+                    building_info=json.dumps(building_info, indent=2),
+                    contact_info=json.dumps(contact_info, indent=2)
+                )
+            )
+            
+            # Parse the response
+            verification = json.loads(response)
+            return {
+                "contact_email_confidence": verification["confidence_score"],
+                "verification_notes": verification["verification_notes"],
+                "verification_flags": verification["verification_flags"],
+                "contact_verified": verification["contact_verified"]
+            }
+
+        except Exception as e:
+            print(f"Error in contact verification: {e}")
+            return None
     
     async def _search_property_manager(self, building) -> Optional[Dict[str, Any]]:
         """
@@ -75,7 +155,7 @@ class ContactFinder:
                 
                 if contact:
                     contact['source'] = 'property_manager_search'
-                    contact['confidence'] = 85
+                    contact['source_url'] = results[0].get('url') if results else None
                     return contact
             
             return None

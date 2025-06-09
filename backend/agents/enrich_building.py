@@ -18,19 +18,16 @@ class BuildingEnricher:
     Uses AI and web search to gather comprehensive building information.
     """
     
-    def __init__(self):
+    def __init__(self, llm=None):
+        """Initialize the BuildingEnricher with optional LLM."""
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         self.serpapi_key = os.getenv("SERPAPI_API_KEY")
         self.geolocator = Nominatim(user_agent="ai_realtor")
         
-        # Initialize LangChain LLM if API key is available
-        if self.openai_api_key:
-            self.llm = OpenAI(
-                openai_api_key=self.openai_api_key,
-                temperature=0.1
-            )
-        else:
-            self.llm = None
+        # Initialize LangChain LLM if provided or API key is available
+        self.llm = llm
+        if not self.llm and self.openai_api_key:
+            self.llm = OpenAI(api_key=self.openai_api_key)
     
     async def enrich_building(self, building_data: Dict[str, Any]) -> Dict[str, Any]:
         """

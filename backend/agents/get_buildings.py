@@ -17,7 +17,7 @@ class BuildingFinder:
     Uses both OpenAI and Google Places API to research actual buildings in the specified area.
     """
     
-    def __init__(self):
+    def __init__(self, google_api_key: str = None):
         # Initialize OpenAI
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         if self.openai_api_key:
@@ -28,10 +28,15 @@ class BuildingFinder:
             print("⚠️ No OpenAI API key found")
             
         # Initialize Google Maps client
-        self.gmaps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        self.gmaps_api_key = google_api_key or os.getenv("GOOGLE_MAPS_API_KEY")
         if self.gmaps_api_key:
-            self.gmaps = googlemaps.Client(key=self.gmaps_api_key)
-            print("✅ Google Maps API key configured")
+            try:
+                self.gmaps = googlemaps.Client(key=self.gmaps_api_key)
+                print("✅ Google Maps API key configured")
+            except Exception as e:
+                print(f"⚠️ Error initializing Google Maps client: {e}")
+                self.gmaps = None
+                print("⚠️ Skipping Google services initialization for testing")
         else:
             self.gmaps = None
             print("⚠️ No Google Maps API key found")

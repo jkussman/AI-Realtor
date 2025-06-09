@@ -79,6 +79,15 @@ class BuildingResponse(BaseModel):
     reply_received: bool
     created_at: datetime
     
+    # Contact confidence information
+    contact_email_confidence: Optional[int] = None
+    contact_source: Optional[str] = None
+    contact_source_url: Optional[str] = None
+    contact_verified: Optional[bool] = None
+    contact_last_verified: Optional[datetime] = None
+    verification_notes: Optional[str] = None
+    verification_flags: Optional[List[str]] = None
+    
     # Additional building details
     property_manager: Optional[str] = None
     number_of_units: Optional[int] = None
@@ -327,10 +336,21 @@ async def get_buildings(db: Session = Depends(get_database)):
                 "email_sent": building.email_sent,
                 "reply_received": building.reply_received,
                 "created_at": building.created_at.isoformat() if building.created_at else None,
+                
+                # Contact confidence information
+                "contact_email_confidence": building.contact_email_confidence,
+                "contact_source": building.contact_source,
+                "contact_source_url": building.contact_source_url,
+                "contact_verified": building.contact_verified,
+                "contact_last_verified": building.contact_last_verified.isoformat() if building.contact_last_verified else None,
+                "verification_notes": building.verification_notes,
+                "verification_flags": building.verification_flags,
+                
                 # Additional building details
                 "property_manager": building.property_manager,
                 "number_of_units": building.number_of_units,
                 "year_built": building.year_built,
+                
                 # New detailed rental information
                 "is_coop": building.is_coop or False,
                 "is_mixed_use": building.is_mixed_use or False,

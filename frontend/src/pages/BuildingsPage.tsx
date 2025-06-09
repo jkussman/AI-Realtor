@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Paper,
@@ -23,7 +23,7 @@ import {
   Grid,
   Card,
   CardContent,
-  CardActions
+  useTheme
 } from '@mui/material';
 import {
   CheckCircle as ApproveIcon,
@@ -67,7 +67,7 @@ const BuildingsPage: React.FC = () => {
     setNotification(prev => ({ ...prev, open: false }));
   };
 
-  const fetchBuildings = async () => {
+  const fetchBuildings = useCallback(async () => {
     setLoading(true);
     try {
       const response = await getBuildings();
@@ -81,7 +81,7 @@ const BuildingsPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [setLoading, setBuildings, showNotification]);
 
   const handleApproveBuilding = async (buildingId: number) => {
     try {
@@ -721,6 +721,102 @@ const BuildingsPage: React.FC = () => {
                   InputProps={{ readOnly: true }}
                 />
               </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Contact Email"
+                  value={selectedBuilding.contact_email || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+              <Grid item xs={12} sm={6}>
+                <TextField
+                  label="Contact Name"
+                  value={selectedBuilding.contact_name || 'Not available'}
+                  fullWidth
+                  InputProps={{ readOnly: true }}
+                />
+              </Grid>
+
+              {/* Contact Verification */}
+              {selectedBuilding.contact_email && (
+                <>
+                  <Grid item xs={12}>
+                    <Typography variant="subtitle1" gutterBottom color="primary">
+                      Contact Verification Details
+                    </Typography>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body2">Confidence Score:</Typography>
+                      <Chip
+                        label={`${selectedBuilding.contact_email_confidence ?? 0}/10`}
+                        color={
+                          selectedBuilding.contact_email_confidence === undefined ? 'error' :
+                          selectedBuilding.contact_email_confidence >= 8 ? 'success' :
+                          selectedBuilding.contact_email_confidence >= 5 ? 'warning' : 'error'
+                        }
+                      />
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <Typography variant="body2">Verified:</Typography>
+                      <Chip
+                        label={selectedBuilding.contact_verified ? 'Yes' : 'No'}
+                        color={selectedBuilding.contact_verified ? 'success' : 'default'}
+                      />
+                    </Box>
+                  </Grid>
+                  <Grid item xs={12} sm={6} md={4}>
+                    <Typography variant="body2">
+                      Last Verified: {selectedBuilding.contact_last_verified ? 
+                        new Date(selectedBuilding.contact_last_verified).toLocaleDateString() : 
+                        'Never'}
+                    </Typography>
+                  </Grid>
+                  {selectedBuilding.contact_source && (
+                    <Grid item xs={12} sm={6}>
+                      <TextField
+                        label="Contact Source"
+                        value={selectedBuilding.contact_source}
+                        fullWidth
+                        InputProps={{ readOnly: true }}
+                      />
+                    </Grid>
+                  )}
+                  {selectedBuilding.verification_notes && (
+                    <Grid item xs={12}>
+                      <TextField
+                        label="Verification Notes"
+                        value={selectedBuilding.verification_notes}
+                        fullWidth
+                        multiline
+                        rows={2}
+                        InputProps={{ readOnly: true }}
+                      />
+                    </Grid>
+                  )}
+                  {selectedBuilding.verification_flags && selectedBuilding.verification_flags.length > 0 && (
+                    <Grid item xs={12}>
+                      <Typography variant="body2" gutterBottom>
+                        Verification Flags:
+                      </Typography>
+                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                        {selectedBuilding.verification_flags.map((flag, index) => (
+                          <Chip
+                            key={index}
+                            label={flag}
+                            color="warning"
+                            size="small"
+                            variant="outlined"
+                          />
+                        ))}
+                      </Box>
+                    </Grid>
+                  )}
+                </>
+              )}
 
               {/* Additional Notes */}
               {selectedBuilding.rental_notes && (

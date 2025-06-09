@@ -3,8 +3,10 @@ Main building pipeline that orchestrates all agent steps.
 """
 
 import asyncio
-from typing import List
+from typing import List, Dict, Any
 from sqlalchemy.orm import Session
+from datetime import datetime
+import json
 
 from .get_buildings import BuildingFinder
 from .enrich_building import BuildingEnricher
@@ -12,6 +14,7 @@ from .find_contact import ContactFinder
 # Commenting out email sender for now
 # from .send_email import EmailSender
 from db.models import Building
+from langchain_openai import OpenAI
 
 
 class BuildingPipeline:
@@ -19,12 +22,61 @@ class BuildingPipeline:
     Main pipeline that orchestrates the building discovery and outreach process.
     """
     
-    def __init__(self):
-        self.building_finder = BuildingFinder()
-        self.building_enricher = BuildingEnricher()
-        self.contact_finder = ContactFinder()
+    def __init__(self, google_api_key: str = None, openai_api_key: str = None):
+        """Initialize the pipeline components."""
+        # Initialize OpenAI client
+        self.llm = OpenAI(
+            api_key=openai_api_key,
+            temperature=0,
+            model_name="gpt-4-turbo-preview"
+        )
+        
+        # Initialize pipeline components
+        self.building_finder = BuildingFinder(google_api_key)
+        self.building_enricher = BuildingEnricher(llm=self.llm)
+        self.contact_finder = ContactFinder(llm=self.llm)
         # Commenting out email sender for now
         # self.email_sender = EmailSender()
+    
+    async def process_buildings(self, location: Dict[str, float], search_radius: int = 1000) -> List[Dict[str, Any]]:
+        """
+        Process buildings through the entire pipeline.
+        
+        Args:
+            location: Dict with 'lat' and 'lng' for the search center
+            search_radius: Radius in meters to search (default 1000)
+            
+        Returns:
+            List of processed buildings with enhanced information
+        """
+        try:
+            # Find buildings using Google Places
+            buildings = await self.building_finder.find_buildings(location, search_radius)
+            print(f"Found {len(buildings)} buildings")
+            
+            # Process each building
+            processed_buildings = []
+            for building in buildings:
+                try:
+                    # Enrich building information
+                    enriched = await self.building_enricher.enrich_building(building)
+                    if enriched:
+                        # Find contact information
+                        contact_info = await self.contact_finder.find_contact_for_building(enriched)
+                        if contact_info:
+                            enriched.update(contact_info)
+                        
+                        processed_buildings.append(enriched)
+                except Exception as e:
+                    print(f"Error processing building {building.get('name', 'Unknown')}: {str(e)}")
+                    continue
+            
+            print(f"Successfully processed {len(processed_buildings)} buildings")
+            return processed_buildings
+            
+        except Exception as e:
+            print(f"Error in building pipeline: {str(e)}")
+            return []
     
     async def process_bounding_boxes(self, bounding_boxes: List[dict], db: Session):
         """
@@ -46,28 +98,61 @@ class BuildingPipeline:
                 buildings = await self.building_finder.get_buildings_from_bbox(bbox)
                 
                 for building_data in buildings:
-                    # Step 2: Enrich building data
-                    enriched_data = await self.building_enricher.enrich_building(building_data)
-                    
-                    # Step 3: Save to database
-                    building = Building(
-                        name=enriched_data.get('name'),
-                        address=enriched_data['address'],
-                        building_type=enriched_data.get('building_type', 'residential_apartment'),
-                        bounding_box=bbox,
-                        property_manager=enriched_data.get('property_manager'),
-                        number_of_units=enriched_data.get('number_of_units'),
-                        year_built=enriched_data.get('year_built'),
-                        square_footage=enriched_data.get('square_footage')
-                    )
-                    
-                    db.add(building)
-                    all_buildings.append(building)
+                    try:
+                        # Step 2: Enrich building data
+                        enriched_data = await self.building_enricher.enrich_building(building_data)
+                        
+                        # Step 3: Save to database
+                        building = Building(
+                            name=enriched_data.get('name'),
+                            address=enriched_data['address'],
+                            latitude=str(enriched_data.get('latitude')) if enriched_data.get('latitude') else None,
+                            longitude=str(enriched_data.get('longitude')) if enriched_data.get('longitude') else None,
+                            building_type=enriched_data.get('building_type', 'residential_apartment'),
+                            bounding_box=json.dumps(bbox),
+                            approved=False,
+                            email_sent=False,
+                            reply_received=False,
+                            
+                            # Basic building info
+                            property_manager=enriched_data.get('property_manager'),
+                            number_of_units=enriched_data.get('estimated_units'),
+                            year_built=enriched_data.get('year_built'),
+                            
+                            # Detailed rental information
+                            is_coop=enriched_data.get('is_coop', False),
+                            is_mixed_use=enriched_data.get('is_mixed_use', False),
+                            total_apartments=enriched_data.get('total_apartments'),
+                            two_bedroom_apartments=enriched_data.get('two_bedroom_apartments'),
+                            recent_2br_rent=enriched_data.get('recent_2br_rent'),
+                            rent_range_2br=enriched_data.get('rent_range_2br'),
+                            has_laundry=enriched_data.get('has_laundry', False),
+                            laundry_type=enriched_data.get('laundry_type'),
+                            amenities=json.dumps(enriched_data.get('amenities', [])),
+                            pet_policy=enriched_data.get('pet_policy'),
+                            building_style=enriched_data.get('building_style'),
+                            management_company=enriched_data.get('management_company'),
+                            contact_info=enriched_data.get('contact_info'),
+                            recent_availability=enriched_data.get('recent_availability', False),
+                            rental_notes=enriched_data.get('rental_notes'),
+                            neighborhood=enriched_data.get('neighborhood'),
+                            stories=enriched_data.get('stories')
+                        )
+                        
+                        db.add(building)
+                        all_buildings.append(building)
+                        
+                    except Exception as e:
+                        print(f"Error processing building {building_data.get('address')}: {str(e)}")
+                        continue
             
             # Commit all buildings to database
-            db.commit()
+            if all_buildings:
+                db.commit()
+                print(f"Successfully processed {len(all_buildings)} buildings")
+            else:
+                print("No buildings were processed")
             
-            print(f"Successfully processed {len(all_buildings)} buildings")
             return all_buildings
             
         except Exception as e:

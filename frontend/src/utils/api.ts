@@ -23,6 +23,15 @@ export interface Building {
   reply_received: boolean;
   created_at: string;
   
+  // Contact confidence information
+  contact_email_confidence?: number;
+  contact_source?: string;
+  contact_source_url?: string;
+  contact_verified?: boolean;
+  contact_last_verified?: string;
+  verification_notes?: string;
+  verification_flags?: string[];
+  
   // Additional building details  
   property_manager?: string;
   number_of_units?: number;

@@ -30,6 +30,15 @@ class Building(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
+    # Contact confidence scores
+    contact_email_confidence = Column(Integer, default=0)  # 1-10 confidence score
+    contact_source = Column(String, nullable=True)  # Where the contact was found
+    contact_source_url = Column(String, nullable=True)  # URL where contact was found
+    contact_verified = Column(Boolean, default=False)  # Whether contact was verified
+    contact_last_verified = Column(DateTime, nullable=True)  # When contact was last verified
+    verification_notes = Column(Text, nullable=True)  # Notes about verification process
+    verification_flags = Column(JSON, nullable=True)  # Array of verification flags
+    
     # Basic building info
     property_manager = Column(String, nullable=True)
     number_of_units = Column(Integer, nullable=True)
