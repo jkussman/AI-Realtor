@@ -7,9 +7,9 @@ import random
 import re
 from typing import Dict, Any, Optional, List
 import requests
-from langchain.llms import OpenAI
-from langchain.prompts import PromptTemplate
 from bs4 import BeautifulSoup
+from langchain_openai import OpenAI
+from langchain_core.prompts import PromptTemplate
 import os
 import json
 

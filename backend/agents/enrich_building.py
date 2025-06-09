@@ -6,8 +6,8 @@ import asyncio
 import random
 from typing import Dict, Any, Optional
 import requests
-from langchain.llms import OpenAI
-from langchain.prompts import PromptTemplate
+from langchain_openai import OpenAI
+from langchain_core.prompts import PromptTemplate
 from geopy.geocoders import Nominatim
 import os
 

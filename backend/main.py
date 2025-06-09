@@ -18,7 +18,8 @@ from db.database import get_database, init_database
 from db.models import Building, EmailLog
 from agents.building_pipeline import BuildingPipeline
 from agents.get_buildings import BuildingFinder
-from services.gmail_api import GmailService
+# Commenting out Gmail service for now
+# from services.gmail_api import GmailService
 
 # Skip service imports that require Google auth for now
 print("⚠️ Skipping Google services initialization for testing")
@@ -35,7 +36,7 @@ app = FastAPI(
 # CORS middleware for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React frontend
+    allow_origins=["*"],  # Allow all origins in development
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -47,7 +48,7 @@ async def startup_event():
     init_database()
 
 # Initialize services
-gmail_service = GmailService()
+# gmail_service = GmailService()  # Commenting out for now
 building_pipeline = BuildingPipeline()
 building_finder = BuildingFinder()
 
@@ -205,7 +206,7 @@ class RealisticBuildingPipeline:
 building_pipeline = RealisticBuildingPipeline()
 
 # Skip Gmail for testing
-gmail_service = None
+# gmail_service = None
 print("⚠️ Gmail service skipped for testing (Google verification needed)")
 print("📧 Email features will be disabled until Gmail is set up")
 

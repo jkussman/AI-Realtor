@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from .get_buildings import BuildingFinder
 from .enrich_building import BuildingEnricher
 from .find_contact import ContactFinder
-from .send_email import EmailSender
+# Commenting out email sender for now
+# from .send_email import EmailSender
 from db.models import Building
 
 
@@ -22,7 +23,8 @@ class BuildingPipeline:
         self.building_finder = BuildingFinder()
         self.building_enricher = BuildingEnricher()
         self.contact_finder = ContactFinder()
-        self.email_sender = EmailSender()
+        # Commenting out email sender for now
+        # self.email_sender = EmailSender()
     
     async def process_bounding_boxes(self, bounding_boxes: List[dict], db: Session):
         """
@@ -103,21 +105,22 @@ class BuildingPipeline:
                     print(f"No contact found for building: {building.address}")
                     return
             
-            # Step 2: Send email if contact found
-            if building.contact_email and not building.email_sent:
-                email_result = await self.email_sender.send_email_to_contact(
-                    contact_email=building.contact_email,
-                    contact_name=building.contact_name,
-                    building=building,
-                    db=db
-                )
+            # Commenting out email sending for now
+            # # Step 2: Send email if contact found
+            # if building.contact_email and not building.email_sent:
+            #     email_result = await self.email_sender.send_email_to_contact(
+            #         contact_email=building.contact_email,
+            #         contact_name=building.contact_name,
+            #         building=building,
+            #         db=db
+            #     )
                 
-                if email_result['success']:
-                    building.email_sent = True
-                    db.commit()
-                    print(f"Email sent successfully to {building.contact_email}")
-                else:
-                    print(f"Failed to send email: {email_result['error']}")
+            #     if email_result['success']:
+            #         building.email_sent = True
+            #         db.commit()
+            #         print(f"Email sent successfully to {building.contact_email}")
+            #     else:
+            #         print(f"Failed to send email: {email_result['error']}")
             
         except Exception as e:
             print(f"Error processing approved building: {str(e)}")
