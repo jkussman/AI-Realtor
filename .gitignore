@@ -4,32 +4,26 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
+venv/
+ENV/
 
-# Node
-node_modules/
-npm-debug.log
-yarn-debug.log
-yarn-error.log
+# Database
+*.db
+*.db.backup
+*.sqlite3
+
+# Environment variables
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
 
 # IDE
 .idea/
@@ -37,26 +31,6 @@ yarn-error.log
 *.swp
 *.swo
 
-# Database
-*.db
-*.sqlite3
-*.sqlite
-
-# Logs
-*.log
-server.log
-backend/server.log
-
-# Cache
-.cache/
-frontend/node_modules/.cache/
-*.cache
-
 # OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db 
