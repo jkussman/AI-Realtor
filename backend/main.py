@@ -13,6 +13,8 @@ import signal
 import sys
 import socket
 from dotenv import load_dotenv
+from sqlalchemy import or_, and_
+import json
 
 from db.database import get_database, init_database
 from db.models import Building, EmailLog
@@ -69,15 +71,20 @@ class BuildingResponse(BaseModel):
     id: int
     name: Optional[str] = None
     address: str
+    standardized_address: Optional[str] = None
     latitude: Optional[str] = None
     longitude: Optional[str] = None
     building_type: str
+    bounding_box: Optional[Dict[str, Any]] = None
     approved: bool
     contact_email: Optional[str] = None
     contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    website: Optional[str] = None
     email_sent: bool
     reply_received: bool
     created_at: datetime
+    updated_at: datetime
     
     # Contact confidence information
     contact_email_confidence: Optional[int] = None
@@ -88,12 +95,13 @@ class BuildingResponse(BaseModel):
     verification_notes: Optional[str] = None
     verification_flags: Optional[List[str]] = None
     
-    # Additional building details
+    # Basic building info
     property_manager: Optional[str] = None
     number_of_units: Optional[int] = None
     year_built: Optional[int] = None
+    square_footage: Optional[int] = None
     
-    # New detailed rental information
+    # Detailed rental information
     is_coop: bool = False
     is_mixed_use: bool = False
     total_apartments: Optional[int] = None
@@ -106,7 +114,7 @@ class BuildingResponse(BaseModel):
     pet_policy: Optional[str] = None
     building_style: Optional[str] = None
     management_company: Optional[str] = None
-    contact_info: Optional[str] = None
+    contact_info: Optional[Dict[str, Any]] = None
     recent_availability: bool = False
     rental_notes: Optional[str] = None
     neighborhood: Optional[str] = None
@@ -155,41 +163,92 @@ class RealisticBuildingPipeline:
                 
                 # Create building records in database
                 for building_data in buildings_data:
-                    building = Building(
-                        name=building_data.get('name'),
-                        address=building_data['address'],
-                        latitude=str(building_data.get('latitude')) if building_data.get('latitude') else None,
-                        longitude=str(building_data.get('longitude')) if building_data.get('longitude') else None,
-                        building_type=building_data.get('building_type', 'residential_apartment'),
-                        bounding_box=json.dumps(bbox_dict),
-                        approved=False,
-                        email_sent=False,
-                        reply_received=False,
-                        # Store additional building details as metadata
-                        property_manager=building_data.get('property_manager'),
-                        number_of_units=building_data.get('estimated_units'),
-                        year_built=building_data.get('year_built'),
-                        # Store new detailed rental information
-                        is_coop=building_data.get('is_coop', False),
-                        is_mixed_use=building_data.get('is_mixed_use', False),
-                        total_apartments=building_data.get('total_apartments'),
-                        two_bedroom_apartments=building_data.get('two_bedroom_apartments'),
-                        recent_2br_rent=building_data.get('recent_2br_rent'),
-                        rent_range_2br=building_data.get('rent_range_2br'),
-                        has_laundry=building_data.get('has_laundry', False),
-                        laundry_type=building_data.get('laundry_type'),
-                        amenities=building_data.get('amenities'),
-                        pet_policy=building_data.get('pet_policy'),
-                        building_style=building_data.get('building_style'),
-                        management_company=building_data.get('management_company'),
-                        contact_info=building_data.get('contact_info'),
-                        recent_availability=building_data.get('recent_availability', False),
-                        rental_notes=building_data.get('rental_notes'),
-                        neighborhood=building_data.get('neighborhood'),
-                        stories=building_data.get('stories')
-                    )
-                    db.add(building)
-                    buildings_created.append(building)
+                    try:
+                        # Ensure building_data is a dictionary
+                        if isinstance(building_data, str):
+                            print(f"⚠️ Received string instead of dict: {building_data[:100]}")
+                            continue
+
+                        # Check for duplicates before creating
+                        address = building_data.get('address')
+                        name = building_data.get('name')
+                        standardized_address = building_data.get('standardized_address')
+                        
+                        if not address and not name:
+                            print(f"⚠️ Skipping building with no address or name: {building_data}")
+                            continue
+
+                        # Query for existing buildings with exact address match
+                        existing_building = db.query(Building).filter(
+                            or_(
+                                Building.address == address if address else False,
+                                Building.standardized_address == standardized_address if standardized_address else False,
+                                Building.name == name if name else False
+                            )
+                        ).first()
+
+                        if existing_building:
+                            print(f"⚠️ Skipping duplicate building: {address or name}")
+                            continue
+
+                        # Create new building record
+                        new_building = Building(
+                            name=name,
+                            address=address,
+                            standardized_address=standardized_address,
+                            latitude=building_data.get('latitude'),
+                            longitude=building_data.get('longitude'),
+                            building_type=building_data.get('building_type', 'residential'),
+                            bounding_box=json.dumps(bbox_dict),
+                            approved=False,
+                            email_sent=False,
+                            reply_received=False,
+                            
+                            # Contact information
+                            contact_email=building_data.get('contact_email'),
+                            contact_name=building_data.get('contact_name'),
+                            contact_phone=building_data.get('phone') or building_data.get('contact_phone'),
+                            website=building_data.get('website'),
+                            contact_source=building_data.get('contact_source'),
+                            contact_source_url=building_data.get('contact_source_url'),
+                            contact_email_confidence=building_data.get('contact_email_confidence', 0),
+                            contact_verified=building_data.get('contact_verified', False),
+                            verification_notes=building_data.get('verification_notes'),
+                            verification_flags=building_data.get('verification_flags'),
+                            
+                            # Basic building info
+                            property_manager=building_data.get('property_manager'),
+                            number_of_units=building_data.get('number_of_units'),
+                            year_built=building_data.get('year_built'),
+                            square_footage=building_data.get('square_footage'),
+                            
+                            # Detailed rental information
+                            is_coop=building_data.get('is_coop', False),
+                            is_mixed_use=building_data.get('is_mixed_use', False),
+                            total_apartments=building_data.get('total_apartments'),
+                            two_bedroom_apartments=building_data.get('two_bedroom_apartments'),
+                            recent_2br_rent=building_data.get('recent_2br_rent'),
+                            rent_range_2br=building_data.get('rent_range_2br'),
+                            has_laundry=building_data.get('has_laundry', False),
+                            laundry_type=building_data.get('laundry_type'),
+                            amenities=json.dumps(building_data.get('amenities', [])),
+                            pet_policy=building_data.get('pet_policy'),
+                            building_style=building_data.get('building_style'),
+                            management_company=building_data.get('management_company'),
+                            contact_info=json.dumps(building_data.get('contact_info', {})),
+                            recent_availability=building_data.get('recent_availability', False),
+                            rental_notes=building_data.get('rental_notes'),
+                            neighborhood=building_data.get('neighborhood'),
+                            stories=building_data.get('stories')
+                        )
+                        
+                        db.add(new_building)
+                        db.commit()
+                        print(f"✅ Created new building: {address or name}")
+                    except Exception as e:
+                        print(f"❌ Error creating building: {str(e)}")
+                        db.rollback()
+                        continue
             
             db.commit()
             print(f"✅ Created {len(buildings_created)} realistic buildings from building finder")
@@ -323,19 +382,30 @@ async def get_buildings(db: Session = Depends(get_database)):
         # Convert to the format expected by frontend
         building_list = []
         for building in buildings:
+            # Parse JSON fields
+            bounding_box = json.loads(building.bounding_box) if building.bounding_box else None
+            verification_flags = json.loads(building.verification_flags) if building.verification_flags else None
+            amenities = json.loads(building.amenities) if building.amenities else None
+            contact_info = json.loads(building.contact_info) if building.contact_info else None
+            
             building_list.append({
                 "id": building.id,
                 "name": building.name,
                 "address": building.address,
+                "standardized_address": building.standardized_address,
                 "latitude": building.latitude,
                 "longitude": building.longitude,
                 "building_type": building.building_type,
+                "bounding_box": bounding_box,
                 "approved": building.approved,
                 "contact_email": building.contact_email,
                 "contact_name": building.contact_name,
+                "contact_phone": building.contact_phone,
+                "website": building.website,
                 "email_sent": building.email_sent,
                 "reply_received": building.reply_received,
                 "created_at": building.created_at.isoformat() if building.created_at else None,
+                "updated_at": building.updated_at.isoformat() if building.updated_at else None,
                 
                 # Contact confidence information
                 "contact_email_confidence": building.contact_email_confidence,
@@ -344,28 +414,29 @@ async def get_buildings(db: Session = Depends(get_database)):
                 "contact_verified": building.contact_verified,
                 "contact_last_verified": building.contact_last_verified.isoformat() if building.contact_last_verified else None,
                 "verification_notes": building.verification_notes,
-                "verification_flags": building.verification_flags,
+                "verification_flags": verification_flags,
                 
-                # Additional building details
+                # Basic building info
                 "property_manager": building.property_manager,
                 "number_of_units": building.number_of_units,
                 "year_built": building.year_built,
+                "square_footage": building.square_footage,
                 
-                # New detailed rental information
-                "is_coop": building.is_coop or False,
-                "is_mixed_use": building.is_mixed_use or False,
+                # Detailed rental information
+                "is_coop": building.is_coop,
+                "is_mixed_use": building.is_mixed_use,
                 "total_apartments": building.total_apartments,
                 "two_bedroom_apartments": building.two_bedroom_apartments,
                 "recent_2br_rent": building.recent_2br_rent,
                 "rent_range_2br": building.rent_range_2br,
-                "has_laundry": building.has_laundry or False,
+                "has_laundry": building.has_laundry,
                 "laundry_type": building.laundry_type,
-                "amenities": building.amenities or [],
+                "amenities": amenities,
                 "pet_policy": building.pet_policy,
                 "building_style": building.building_style,
                 "management_company": building.management_company,
-                "contact_info": building.contact_info,
-                "recent_availability": building.recent_availability or False,
+                "contact_info": contact_info,
+                "recent_availability": building.recent_availability,
                 "rental_notes": building.rental_notes,
                 "neighborhood": building.neighborhood,
                 "stories": building.stories
@@ -373,6 +444,7 @@ async def get_buildings(db: Session = Depends(get_database)):
         
         return building_list
     except Exception as e:
+        print(f"Error fetching buildings: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error fetching buildings: {str(e)}")
 
 

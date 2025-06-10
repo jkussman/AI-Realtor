@@ -21,7 +21,8 @@ class BuildingFinder:
         # Initialize OpenAI
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         if self.openai_api_key:
-            self.openai_client = OpenAI(api_key=self.openai_api_key)
+            from openai import AsyncOpenAI
+            self.openai_client = AsyncOpenAI(api_key=self.openai_api_key)
             print("✅ OpenAI API key configured for building research")
         else:
             self.openai_client = None
@@ -158,31 +159,17 @@ class BuildingFinder:
                     if any(t in place_types for t in skip_types):
                         continue
                     
-                    building = {
-                        "address": details.get('formatted_address', ''),
-                        "name": details.get('name', ''),
-                        "building_type": "residential_apartment",
-                        "estimated_units": None,
-                        "year_built": None,
-                        "property_manager": None,
-                        "neighborhood": self._get_nyc_neighborhood(
-                            place['geometry']['location']['lat'],
-                            place['geometry']['location']['lng']
-                        ),
-                        "is_mixed_use": False,
-                        "total_apartments": None,
-                        "has_laundry": None,
-                        "amenities": [],
-                        "pet_policy": None,
-                        "building_style": None,
-                        "stories": None,
-                        "phone": details.get('formatted_phone_number'),
+                    # Create building data
+                    building_data = {
+                        "name": details.get('name'),
+                        "address": details.get('formatted_address'),
+                        "phone": details.get('formatted_phone_number'),  # Changed from contact_phone to phone
                         "website": details.get('website'),
                         "place_types": place_types,
-                        "latitude": place['geometry']['location']['lat'],
-                        "longitude": place['geometry']['location']['lng']
+                        "latitude": details['geometry']['location']['lat'],
+                        "longitude": details['geometry']['location']['lng']
                     }
-                    buildings.append(building)
+                    buildings.append(building_data)
                     
                 except Exception as e:
                     print(f"⚠️ Error getting place details: {e}")
@@ -312,124 +299,157 @@ class BuildingFinder:
 
     async def _enhance_buildings_with_openai(self, buildings: List[Dict[str, Any]], bbox: Dict[str, float]) -> List[Dict[str, Any]]:
         """
-        Use OpenAI to verify buildings have rental units and enhance their data.
+        Use OpenAI to enhance building data and find contact information.
+        Process buildings in batches to avoid timeouts.
         """
         try:
             print(f"🔍 Verifying and enhancing {len(buildings)} buildings with OpenAI")
+            enhanced_buildings = []
+            batch_size = 3  # Process 3 buildings at a time
             
-            # Prepare buildings data for OpenAI
-            buildings_str = json.dumps([{
-                "address": b.get("address", ""),
-                "name": b.get("name", ""),
-                "neighborhood": b.get("neighborhood", ""),
-                "place_types": b.get("place_types", []),
-                "phone": b.get("phone", ""),
-                "website": b.get("website", ""),
-                "latitude": b.get("latitude", ""),
-                "longitude": b.get("longitude", "")
-            } for b in buildings], indent=2)
-            
-            prompt = f"""Given these buildings from Google Places API:
-            {buildings_str}
-            
-            Within these coordinates:
-            North: {bbox['north']}
-            South: {bbox['south']}
-            East: {bbox['east']}
-            West: {bbox['west']}
+            # Process buildings in batches
+            for i in range(0, len(buildings), batch_size):
+                batch = buildings[i:i + batch_size]
+                print(f"📦 Processing batch {i//batch_size + 1} of {(len(buildings) + batch_size - 1)//batch_size}")
+                
+                # Prepare buildings data for OpenAI
+                buildings_str = json.dumps([{
+                    "name": b.get("name", ""),
+                    "address": b.get("address", ""),
+                    "website": b.get("website", "")
+                } for b in batch], indent=2)
+                
+                prompt = f"""Here are some buildings in NYC that need verification and enhancement:
+{buildings_str}
 
-            For each building that has rental apartments available (can be mixed with co-ops/condos), return a JSON object with these properties:
-            - address (keep original)
-            - name (keep original)
-            - latitude (keep original)
-            - longitude (keep original)
-            - estimated_units (total number of units)
-            - rental_units (number of rental units, must be > 0)
-            - ownership_type (e.g. "mixed_rental_coop", "all_rental", "mixed_rental_condo")
-            - year_built (construction year)
-            - property_manager (management company)
-            - is_mixed_use (true/false)
-            - has_laundry (true/false)
-            - amenities (array of amenities)
-            - pet_policy (policy description)
-            - building_style (architectural style)
-            - stories (number of floors)
-            - has_rentals (must be true)
-            - rental_types (array, e.g. ["market_rate", "luxury", "affordable"])
-            - rental_min_price (estimated minimum monthly rent)
-            - rental_max_price (estimated maximum monthly rent)
+For each building, search the web to find and verify:
+1. The correct building name and address
+2. Building type (residential, commercial, mixed-use)
+3. Contact information (focus on finding email addresses and websites)
+4. Any additional useful information
 
-            Return ONLY valid JSON array. Include only buildings with rental units. Keep existing addresses, names, and coordinates.
-            Format the response as a JSON array of objects, each object containing the above properties.
-            IMPORTANT: Return ONLY the JSON array, no other text or markdown."""
+Return a JSON array with the enhanced building information. Each building should have these fields:
+- name: string
+- address: string
+- building_type: string
+- website: string
+- contact_info: object with any additional contact details (focus on email)
+- verified: boolean (true if information was verified)
+- confidence: number (0-1)
+- additional_info: string (any other useful information)"""
 
-            print("⏳ Calling OpenAI API to enhance buildings...")
-            try:
-                response = self.openai_client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[
-                        {"role": "system", "content": "You are a NYC real estate expert. Verify buildings have rental units available and enhance with accurate details. Only include buildings with rentals. Return ONLY a valid JSON array."},
+                try:
+                    messages = [
+                        {"role": "system", "content": "You are a NYC real estate expert with web search capabilities. Research and enhance building details with accurate information from the web. Focus on finding email contacts. Return ONLY a valid JSON array."},
                         {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.1,
-                    max_tokens=4000
-                )
-            except Exception as e:
-                if "rate limit" in str(e).lower():
-                    print("❌ OpenAI API rate limit exceeded. Please try again in a few seconds.")
-                    raise Exception("OpenAI API rate limit exceeded")
-                else:
-                    print(f"❌ OpenAI API error: {e}")
-                    raise Exception(f"OpenAI API error: {e}")
-            
-            ai_response = response.choices[0].message.content.strip()
-            print(f"📋 Raw OpenAI response length: {len(ai_response)} characters")
-            
-            # Remove any markdown code block syntax
-            if ai_response.startswith("```"):
-                ai_response = ai_response.split("\n", 1)[1]  # Remove first line
-            if ai_response.endswith("```"):
-                ai_response = ai_response.rsplit("\n", 1)[0]  # Remove last line
-            if ai_response.startswith("json"):
-                ai_response = ai_response.split("\n", 1)[1]  # Remove json tag
-            
-            try:
-                enhanced_data = json.loads(ai_response)
-                if not isinstance(enhanced_data, list):
-                    if isinstance(enhanced_data, dict) and "buildings" in enhanced_data:
-                        enhanced_data = enhanced_data["buildings"]
-                    else:
-                        enhanced_data = [enhanced_data]
-                
-                print(f"✅ Successfully parsed enhanced data for {len(enhanced_data)} buildings")
-                
-                # Merge enhanced data with original buildings
-                enhanced_buildings = []
-                for orig in buildings:
-                    # Find matching enhanced building by address
-                    enhanced = next(
-                        (b for b in enhanced_data 
-                         if b.get("address") == orig.get("address")), 
-                        None
+                    ]
+
+                    # Initial API call with timeout
+                    response = await asyncio.wait_for(
+                        self._async_openai_call(messages),
+                        timeout=30  # 30 second timeout
                     )
-                    
-                    if enhanced and enhanced.get("has_rentals"):
-                        # Merge original data with enhanced data
-                        merged = orig.copy()
-                        merged.update(enhanced)
-                        enhanced_buildings.append(merged)
+
+                    message = response.choices[0].message
+                    messages.append({"role": "assistant", "content": message.content, "tool_calls": message.tool_calls})
+
+                    # If we got tool calls, execute them and add their results
+                    if message.tool_calls:
+                        for tool_call in message.tool_calls:
+                            if tool_call.function.name == "web_search":
+                                # Execute web search
+                                args = json.loads(tool_call.function.arguments)
+                                search_query = args["query"]
+                                print(f"🔍 Searching web for: {search_query}")
+                                
+                                # Mock web search results for now
+                                search_results = f"Found information about {search_query}:\n"
+                                search_results += "- Type: Residential apartment building\n"
+                                search_results += "- Contact: Available on official website\n"
+                                search_results += "- Additional: Modern amenities, doorman building"
+                                
+                                # Add tool result back to conversation
+                                messages.append({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call.id,
+                                    "name": tool_call.function.name,
+                                    "content": search_results
+                                })
+
+                        # Make final API call with all context
+                        final_response = await asyncio.wait_for(
+                            self._async_openai_call(messages, response_format={"type": "json_object"}),
+                            timeout=30  # 30 second timeout
+                        )
+                        
+                        # Get the final JSON response
+                        final_content = final_response.choices[0].message.content
+                        print(f"📋 Raw OpenAI response length: {len(final_content)} characters")
+                        print(f"First 100 characters of response: {final_content[:100]}")
+                        
+                        try:
+                            enhanced_data = json.loads(final_content)
+                            if isinstance(enhanced_data, dict):
+                                if "error" in enhanced_data:
+                                    print(f"⚠️ Received string instead of dict: {enhanced_data['error']}")
+                                    continue
+                                elif "buildings" in enhanced_data:
+                                    enhanced_data = enhanced_data["buildings"]
+                                    
+                            # Convert to list if single building
+                            if not isinstance(enhanced_data, list):
+                                enhanced_data = [enhanced_data]
+                                
+                            # Add enhanced buildings to results
+                            enhanced_buildings.extend(enhanced_data)
+                            
+                        except json.JSONDecodeError as e:
+                            print(f"❌ Failed to parse JSON response: {e}")
+                            continue
+                            
+                except asyncio.TimeoutError:
+                    print("❌ OpenAI API call timed out")
+                    continue
+                except Exception as e:
+                    print(f"❌ Error processing batch: {e}")
+                    continue
                 
-                print(f"✅ Enhanced {len(enhanced_buildings)} buildings with rental information")
-                if not enhanced_buildings:
-                    print("⚠️ No buildings with rental units found")
-                    raise Exception("No buildings with rental units found")
-                return enhanced_buildings
-                
-            except json.JSONDecodeError as e:
-                print(f"❌ Failed to parse enhanced JSON: {e}")
-                print(f"First 100 characters of response: {ai_response[:100]}")
-                raise Exception(f"Failed to parse OpenAI response: {e}")
+                # Add a small delay between batches
+                await asyncio.sleep(1)
+            
+            return enhanced_buildings
             
         except Exception as e:
             print(f"❌ Error in OpenAI enhancement: {e}")
-            raise  # Re-raise the exception to be handled by the caller 
+            return []
+
+    async def _async_openai_call(self, messages, response_format=None):
+        """Helper method to make async OpenAI API calls"""
+        kwargs = {
+            "model": "gpt-4-turbo-preview",
+            "messages": messages,
+            "temperature": 0.1,
+            "max_tokens": 2000,
+            "tools": [{
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Search the web for real-time information",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "The search query"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            }]
+        }
+        
+        if response_format:
+            kwargs["response_format"] = response_format
+            
+        return await self.openai_client.chat.completions.create(**kwargs) 

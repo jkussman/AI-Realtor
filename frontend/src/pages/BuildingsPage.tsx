@@ -295,6 +295,7 @@ const BuildingsPage: React.FC = () => {
                 <TableCell>Address</TableCell>
                 <TableCell>Building Name</TableCell>
                 <TableCell>Type</TableCell>
+                <TableCell>Contact Info</TableCell>
                 <TableCell>Co-op/Mixed Use</TableCell>
                 <TableCell>Apartments</TableCell>
                 <TableCell>2BR Info</TableCell>
@@ -335,6 +336,37 @@ const BuildingsPage: React.FC = () => {
                         Built {building.year_built}
                       </Typography>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Box>
+                      {building.contact_email && (
+                        <Typography variant="body2" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                          <EmailIcon fontSize="small" color={building.contact_verified ? "success" : "action"} />
+                          {building.contact_email}
+                          {building.contact_email_confidence && (
+                            <Chip 
+                              label={`${building.contact_email_confidence}/10`}
+                              size="small"
+                              color={
+                                building.contact_email_confidence >= 8 ? "success" :
+                                building.contact_email_confidence >= 5 ? "warning" : "error"
+                              }
+                            />
+                          )}
+                        </Typography>
+                      )}
+                      {building.contact_name && (
+                        <Typography variant="caption" color="text.secondary" display="block">
+                          {building.contact_name}
+                          {building.property_manager && ` (${building.property_manager})`}
+                        </Typography>
+                      )}
+                      {!building.contact_email && !building.contact_name && (
+                        <Typography variant="body2" color="text.secondary" fontStyle="italic">
+                          No contact info
+                        </Typography>
+                      )}
+                    </Box>
                   </TableCell>
                   <TableCell>
                     <Box>

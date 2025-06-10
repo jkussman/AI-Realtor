@@ -27,7 +27,26 @@ class ContactFinder:
         if not self.llm and os.getenv("OPENAI_API_KEY"):
             self.llm = OpenAI(
                 api_key=os.getenv("OPENAI_API_KEY"),
-                temperature=0.1
+                temperature=0.1,
+                model_name="gpt-4-turbo-preview",
+                tools=[{
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "Search the web for real-time information about buildings and real estate.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "The search query"
+                                }
+                            },
+                            "required": ["query"]
+                        }
+                    }
+                }],
+                tool_choice="auto"  # Let the model decide when to search
             )
         
         self.verify_prompt = PromptTemplate(
@@ -55,50 +74,85 @@ class ContactFinder:
             - Consistency with building management company
             - Presence in professional directories
             - Recent verification dates
+            - Whether the contact is specifically a building manager or realtor
+            - Professional real estate credentials or affiliations
             
             Respond only with the JSON object, no other text."""
         )
     
-    async def find_contact_for_building(self, building) -> Optional[Dict[str, Any]]:
+    async def find_contact_for_building(self, building: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
-        Find contact information for a building.
-        
-        Args:
-            building: Building object from database
+        Find contact information for a building using multiple strategies.
+        """
+        try:
+            print(f"🔍 Finding contacts for building: {building.get('name')} at {building.get('address')}")
             
-        Returns:
-            Dictionary with contact information or None if not found
-        """
-        print(f"Finding contact for building: {building.address}")
-        
-        # Try multiple search strategies
-        contact_info = None
-        
-        # Strategy 1: Web search for property manager
-        contact_info = await self._search_property_manager(building)
-        
-        if not contact_info:
-            # Strategy 2: Search real estate websites
-            contact_info = await self._search_real_estate_sites(building)
-        
-        if not contact_info:
-            # Strategy 3: Search building management companies
-            contact_info = await self._search_management_companies(building)
-        
-        if not contact_info:
-            # Strategy 4: Use AI to generate likely contacts
-            contact_info = await self._ai_generate_contacts(building)
-        
-        if contact_info:
+            # Initialize contact info
+            contact_info = {
+                "email": None,
+                "name": None,
+                "title": None,
+                "contact_phone": building.get("phone") or building.get("contact_phone"),  # Try both phone and contact_phone
+                "source": None,
+                "source_url": None,
+                "contact_email_confidence": 0,
+                "contact_verified": False,
+                "verification_notes": None,
+                "verification_flags": [],
+                "additional_sources": []
+            }
+            
+            # Strategy 1: Check existing building data
+            if building.get("website"):
+                contact_info["source"] = "building_website"
+                contact_info["source_url"] = building["website"]
+                
+            if building.get("property_manager"):
+                contact_info["name"] = building["property_manager"]
+                contact_info["title"] = "Property Manager"
+                
+            # Strategy 2: Search for property management company
+            if building.get("management_company"):
+                company_info = await self._search_management_company(
+                    building["management_company"], 
+                    building["address"]
+                )
+                if company_info:
+                    contact_info.update(company_info)
+                    
+            # Strategy 3: Search real estate websites
+            if not contact_info["email"]:
+                listing_info = await self._search_real_estate_sites(
+                    building["address"],
+                    building.get("name", "")
+                )
+                if listing_info:
+                    contact_info.update(listing_info)
+                    
+            # Strategy 4: Use AI to find additional contact sources
+            ai_contacts = await self._find_contacts_with_ai(building)
+            if ai_contacts:
+                # If we don't have any contact info yet, use the AI-found contacts
+                if not contact_info["email"] and not contact_info["name"]:
+                    contact_info.update(ai_contacts)
+                # Otherwise store as additional sources
+                else:
+                    contact_info["additional_sources"].extend(
+                        ai_contacts.get("additional_sources", [])
+                    )
+            
             # Verify and score the contact information
-            verified_info = await self._verify_contact_info(building, contact_info)
-            if verified_info:
-                return {
-                    **contact_info,
-                    **verified_info
-                }
-        
-        return contact_info
+            if contact_info["email"] or contact_info["name"] or contact_info["contact_phone"]:
+                verified_info = await self._verify_contact_info(building, contact_info)
+                if verified_info:
+                    contact_info.update(verified_info)
+                    
+            print(f"✅ Found contact information for {building.get('name')}")
+            return contact_info
+            
+        except Exception as e:
+            print(f"❌ Error finding contacts: {e}")
+            return None
     
     async def _verify_contact_info(self, building, contact_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -107,11 +161,11 @@ class ContactFinder:
         try:
             # Prepare building info for the prompt
             building_info = {
-                "name": building.name,
-                "address": building.address,
-                "type": building.building_type,
-                "management_company": building.management_company,
-                "total_units": building.total_apartments
+                "name": building.get('name'),
+                "address": building.get('address'),
+                "type": building.get('building_type'),
+                "management_company": building.get('management_company'),
+                "total_units": building.get('total_apartments')
             }
             
             # Get verification from OpenAI
@@ -133,6 +187,38 @@ class ContactFinder:
 
         except Exception as e:
             print(f"Error in contact verification: {e}")
+            return None
+    
+    async def _search_building_manager(self, building) -> Optional[Dict[str, Any]]:
+        """
+        Search specifically for building manager or realtor contact information.
+        """
+        try:
+            search_queries = [
+                f"{building.address} building manager contact",
+                f"{building.address} property realtor contact",
+                f"{building.address} leasing agent contact",
+                f"{building.name} building manager" if building.name else None,
+                f"{building.address} site:linkedin.com property manager",
+                f"{building.address} site:streeteasy.com agent contact",
+                f"{building.address} site:propertyshark.com manager"
+            ]
+            
+            search_queries = [q for q in search_queries if q]
+            
+            for query in search_queries:
+                results = await self._web_search(query)
+                contact = self._extract_contact_from_results(results)
+                
+                if contact:
+                    contact['source'] = 'building_manager_search'
+                    contact['source_url'] = results[0].get('url') if results else None
+                    return contact
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error searching building manager: {e}")
             return None
     
     async def _search_property_manager(self, building) -> Optional[Dict[str, Any]]:
@@ -271,7 +357,32 @@ class ContactFinder:
         try:
             if self.serpapi_key:
                 return await self._serpapi_search(query)
-            return []
+            
+            # Fallback to direct web scraping of key real estate sites
+            results = []
+            
+            # List of real estate sites to scrape
+            sites = [
+                "streeteasy.com",
+                "propertyshark.com",
+                "loopnet.com",
+                "realtor.com",
+                "zillow.com"
+            ]
+            
+            for site in sites:
+                try:
+                    url = f"https://www.{site}/search?q={query}"
+                    headers = {'User-Agent': 'Mozilla/5.0'}
+                    response = requests.get(url, headers=headers, timeout=10)
+                    if response.status_code == 200:
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        results.extend(self._extract_contact_from_html(soup, site))
+                except Exception as e:
+                    print(f"Error scraping {site}: {e}")
+                    continue
+            
+            return results
                 
         except Exception as e:
             print(f"Error in web search: {e}")
@@ -316,6 +427,65 @@ class ContactFinder:
             
         return parsed_results
     
+    def _extract_contact_from_html(self, soup: BeautifulSoup, site: str) -> List[Dict[str, Any]]:
+        """
+        Extract contact information from HTML based on site-specific patterns.
+        """
+        results = []
+        
+        # Common patterns for contact information
+        email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+        phone_pattern = r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
+        
+        # Site-specific extraction patterns
+        if site == "streeteasy.com":
+            agent_divs = soup.find_all('div', {'class': ['agent-info', 'building-info']})
+            for div in agent_divs:
+                contact = {}
+                name_elem = div.find('span', {'class': 'agent-name'})
+                if name_elem:
+                    contact['name'] = name_elem.text.strip()
+                
+                # Look for emails in text or href attributes
+                email_elems = div.find_all(['a', 'span'], href=True)
+                for elem in email_elems:
+                    emails = re.findall(email_pattern, elem.get('href', '') + elem.text)
+                    if emails:
+                        contact['email'] = emails[0]
+                        break
+                
+                if contact:
+                    contact['source'] = 'streeteasy'
+                    results.append(contact)
+                    
+        elif site == "propertyshark.com":
+            contact_divs = soup.find_all('div', {'class': ['contact-info', 'property-contact']})
+            for div in contact_divs:
+                contact = {}
+                text_content = div.get_text()
+                
+                # Extract name if present
+                name_match = re.search(r'(Manager|Agent|Contact):\s*([A-Za-z\s]+)', text_content)
+                if name_match:
+                    contact['name'] = name_match.group(2).strip()
+                
+                # Extract email and phone
+                emails = re.findall(email_pattern, text_content)
+                phones = re.findall(phone_pattern, text_content)
+                
+                if emails:
+                    contact['email'] = emails[0]
+                if phones:
+                    contact['contact_phone'] = phones[0]
+                    
+                if contact:
+                    contact['source'] = 'propertyshark'
+                    results.append(contact)
+        
+        # Add more site-specific extraction patterns as needed
+        
+        return results
+    
     def _extract_contact_from_results(self, search_results: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """
         Extract contact information from search results.
@@ -324,13 +494,17 @@ class ContactFinder:
             # Extract email addresses
             emails = self._extract_emails(result.get('snippet', ''))
             
-            if emails:
-                # Extract potential names and titles
-                name = self._extract_name_from_text(result.get('snippet', ''))
-                title = self._extract_title_from_text(result.get('snippet', ''))
-                
+            # Extract phone numbers
+            phones = self._extract_phones(result.get('snippet', ''))
+            
+            # Extract potential names and titles
+            name = self._extract_name_from_text(result.get('snippet', ''))
+            title = self._extract_title_from_text(result.get('snippet', ''))
+            
+            if emails or phones:
                 return {
-                    'email': emails[0],  # Use first email found
+                    'email': emails[0] if emails else None,  # Use first email found
+                    'contact_phone': phones[0] if phones else None,  # Use first phone found
                     'name': name,
                     'title': title,
                     'source_url': result.get('url'),
@@ -346,15 +520,23 @@ class ContactFinder:
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
         return re.findall(email_pattern, text)
     
+    def _extract_phones(self, text: str) -> List[str]:
+        """
+        Extract phone numbers from text.
+        """
+        phone_pattern = r'\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
+        return re.findall(phone_pattern, text)
+    
     def _extract_name_from_text(self, text: str) -> Optional[str]:
         """
         Extract potential contact names from text.
         """
         # Look for patterns like "Contact John Smith" or "Manager: Jane Doe"
         name_patterns = [
-            r'Contact\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
-            r'Manager:?\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
-            r'Leasing Agent\s+([A-Z][a-z]+\s+[A-Z][a-z]+)'
+            r'(?:Contact|Manager|Agent|Realtor|Leasing Agent)s?:?\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)',
+            r'(?:Contact|Manager|Agent|Realtor|Leasing Agent)s?:?\s+([A-Z][a-z]+\s+[A-Z][a-z]+)',
+            r'([A-Z][a-z]+\s+[A-Z][a-z]+)\s+(?:is (?:the )?(?:building |property )?(?:manager|agent|realtor))',
+            r'(?:building|property) (?:manager|agent|realtor)[\s:]+([A-Z][a-z]+\s+[A-Z][a-z]+)'
         ]
         
         for pattern in name_patterns:
@@ -369,8 +551,11 @@ class ContactFinder:
         Extract potential job titles from text.
         """
         titles = [
-            'Property Manager', 'Leasing Manager', 'Building Manager',
-            'Property Management', 'Leasing Agent', 'Building Superintendent'
+            'Building Manager', 'Property Manager', 'Leasing Manager',
+            'Real Estate Agent', 'Realtor', 'Building Superintendent',
+            'Leasing Agent', 'Property Management', 'Building Management',
+            'Licensed Real Estate Agent', 'Licensed Real Estate Broker',
+            'Property Management Professional', 'Building Representative'
         ]
         
         text_lower = text.lower()

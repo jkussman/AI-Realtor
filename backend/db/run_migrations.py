@@ -4,8 +4,11 @@ Script to run database migrations.
 
 import os
 from sqlalchemy import create_engine, text
-from migrations.create_buildings_table import upgrade as create_buildings
-from migrations.add_contact_confidence import upgrade as add_contact_confidence
+
+# Import migrations
+from .migrations.create_buildings_table import upgrade as create_buildings
+from .migrations.update_contact_info_to_json import upgrade as update_contact_info
+from .migrations.add_website import upgrade as add_website
 
 def check_database_exists(engine):
     """Check if the database file exists and has the buildings table."""
@@ -21,36 +24,17 @@ def check_database_exists(engine):
         return False
 
 def run_migrations():
-    """Run all pending database migrations."""
+    """Run all database migrations in order."""
     # Get database URL from environment or use default
-    database_url = os.getenv('DATABASE_URL', 'sqlite:///./ai_realtor.db')
-    
-    # Create engine
+    database_url = os.getenv('DATABASE_URL', 'sqlite:///ai_realtor.db')
     engine = create_engine(database_url)
     
-    print("Running migrations...")
+    # Run migrations in order
+    create_buildings(engine)  # This now includes all necessary fields
+    update_contact_info(engine)  # Update contact_info to JSON type
+    add_website(engine)  # Add website column
     
-    try:
-        # Check if database exists
-        database_exists = check_database_exists(engine)
-        
-        if not database_exists:
-            # Create buildings table with all fields
-            print("Creating buildings table...")
-            create_buildings(engine)
-            print("✅ Buildings table created")
-        else:
-            print("ℹ️ Buildings table already exists")
-        
-        # Add contact confidence columns if needed
-        print("\nAdding contact confidence columns...")
-        add_contact_confidence(engine)
-        
-    except Exception as e:
-        print(f"❌ Error running migrations: {str(e)}")
-        raise e
-    
-    print("\n✅ All migrations complete")
+    print("✅ All migrations completed successfully")
 
 if __name__ == "__main__":
     run_migrations() 

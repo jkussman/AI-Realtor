@@ -27,7 +27,29 @@ class BuildingEnricher:
         # Initialize LangChain LLM if provided or API key is available
         self.llm = llm
         if not self.llm and self.openai_api_key:
-            self.llm = OpenAI(api_key=self.openai_api_key)
+            self.llm = OpenAI(
+                api_key=self.openai_api_key,
+                temperature=0.1,
+                model_name="gpt-4-turbo-preview",
+                tools=[{
+                    "type": "function",
+                    "function": {
+                        "name": "web_search",
+                        "description": "Search the web for real-time information about buildings and real estate.",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "The search query"
+                                }
+                            },
+                            "required": ["query"]
+                        }
+                    }
+                }],
+                tool_choice="auto"  # Let the model decide when to search
+            )
     
     async def enrich_building(self, building_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -68,13 +90,37 @@ class BuildingEnricher:
         
         try:
             # Use geocoding to standardize address
-            location = self.geolocator.geocode(address)
+            location = self.geolocator.geocode(address, exactly_one=True)
             
             if location:
-                building_data['standardized_address'] = location.address
-                building_data['latitude'] = location.latitude
-                building_data['longitude'] = location.longitude
-                building_data['address_confidence'] = 'high'
+                # Extract components from the standardized address
+                address_parts = location.address.split(',')
+                
+                # Clean and standardize the address parts
+                cleaned_parts = [part.strip() for part in address_parts]
+                
+                # Reconstruct the address in a standard format
+                # For NYC addresses, we want: Street Address, Borough, NY ZIP
+                if len(cleaned_parts) >= 3:
+                    street = cleaned_parts[0]
+                    city_or_borough = next((part for part in cleaned_parts if any(borough in part.lower() for borough in ['manhattan', 'brooklyn', 'queens', 'bronx', 'staten island'])), 'New York')
+                    state = next((part for part in cleaned_parts if 'NY' in part or 'New York' in part), 'NY')
+                    zip_code = next((part for part in cleaned_parts if part.strip().isdigit() and len(part.strip()) == 5), '')
+                    
+                    # Construct standardized address
+                    standardized_address = f"{street}, {city_or_borough}, {state}"
+                    if zip_code:
+                        standardized_address += f" {zip_code}"
+                    
+                    building_data['standardized_address'] = standardized_address
+                    building_data['latitude'] = location.latitude
+                    building_data['longitude'] = location.longitude
+                    building_data['address_confidence'] = 'high'
+                else:
+                    building_data['standardized_address'] = location.address
+                    building_data['latitude'] = location.latitude
+                    building_data['longitude'] = location.longitude
+                    building_data['address_confidence'] = 'medium'
             else:
                 building_data['address_confidence'] = 'low'
                 

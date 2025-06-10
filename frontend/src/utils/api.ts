@@ -15,13 +15,20 @@ export interface Building {
   id: number;
   name?: string;
   address: string;
+  standardized_address?: string;
+  latitude?: string;
+  longitude?: string;
   building_type: string;
+  bounding_box?: Record<string, any>;
   approved: boolean;
   contact_email?: string;
   contact_name?: string;
+  contact_phone?: string;
+  website?: string;
   email_sent: boolean;
   reply_received: boolean;
   created_at: string;
+  updated_at: string;
   
   // Contact confidence information
   contact_email_confidence?: number;
@@ -32,12 +39,13 @@ export interface Building {
   verification_notes?: string;
   verification_flags?: string[];
   
-  // Additional building details  
+  // Basic building info
   property_manager?: string;
   number_of_units?: number;
   year_built?: number;
+  square_footage?: number;
   
-  // New detailed rental information
+  // Detailed rental information
   is_coop: boolean;
   is_mixed_use: boolean;
   total_apartments?: number;
@@ -50,7 +58,7 @@ export interface Building {
   pet_policy?: string;
   building_style?: string;
   management_company?: string;
-  contact_info?: string;
+  contact_info?: Record<string, any>;
   recent_availability: boolean;
   rental_notes?: string;
   neighborhood?: string;

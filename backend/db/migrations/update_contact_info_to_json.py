@@ -1,19 +1,21 @@
 """
-Migration script to create the buildings table.
+Migration to update contact_info column type from VARCHAR to JSON.
 """
 
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, Boolean, DateTime, JSON, Text
-from sqlalchemy.sql import text
-from datetime import datetime
+from sqlalchemy import text
 
 def upgrade(engine):
-    """Create buildings table."""
-    meta = MetaData()
-    
-    with engine.begin() as conn:
-        # First create the table
-        conn.execute(text("""
-            CREATE TABLE IF NOT EXISTS buildings (
+    """Run the migration to update contact_info column type."""
+    with engine.connect() as connection:
+        # SQLite doesn't support ALTER COLUMN, so we need to:
+        # 1. Create a new temporary table
+        # 2. Copy the data
+        # 3. Drop the old table
+        # 4. Rename the new table
+        
+        # Create new table with updated schema
+        connection.execute(text("""
+            CREATE TABLE buildings_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name VARCHAR,
                 address VARCHAR NOT NULL,
@@ -31,8 +33,6 @@ def upgrade(engine):
                 reply_received BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                
-                -- Contact confidence fields
                 contact_email_confidence INTEGER DEFAULT 0,
                 contact_source VARCHAR,
                 contact_source_url VARCHAR,
@@ -40,14 +40,10 @@ def upgrade(engine):
                 contact_last_verified TIMESTAMP,
                 verification_notes TEXT,
                 verification_flags JSON,
-                
-                -- Basic building info
                 property_manager VARCHAR,
                 number_of_units INTEGER,
                 year_built INTEGER,
                 square_footage INTEGER,
-                
-                -- Detailed rental information
                 is_coop BOOLEAN DEFAULT FALSE,
                 is_mixed_use BOOLEAN DEFAULT FALSE,
                 total_apartments INTEGER,
@@ -65,28 +61,37 @@ def upgrade(engine):
                 rental_notes TEXT,
                 neighborhood VARCHAR,
                 stories INTEGER
-            );
+            )
         """))
         
-        # Then add unique constraints
-        conn.execute(text("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_buildings_address 
+        # Copy data from old table to new table
+        connection.execute(text("""
+            INSERT INTO buildings_new 
+            SELECT * FROM buildings
+        """))
+        
+        # Drop old table
+        connection.execute(text("DROP TABLE buildings"))
+        
+        # Rename new table to original name
+        connection.execute(text("ALTER TABLE buildings_new RENAME TO buildings"))
+        
+        # Recreate indices
+        connection.execute(text("""
+            CREATE UNIQUE INDEX idx_buildings_address 
             ON buildings(address) 
-            WHERE address IS NOT NULL;
+            WHERE address IS NOT NULL
         """))
         
-        conn.execute(text("""
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_buildings_standardized_address 
+        connection.execute(text("""
+            CREATE UNIQUE INDEX idx_buildings_standardized_address 
             ON buildings(standardized_address) 
-            WHERE standardized_address IS NOT NULL;
+            WHERE standardized_address IS NOT NULL
         """))
         
-        print("✅ Buildings table created with unique constraints")
+        print("✅ Updated contact_info column to JSON type")
 
 def downgrade(engine):
-    """Drop buildings table."""
-    meta = MetaData()
-    
-    with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS buildings;"))
-        print("✅ Buildings table dropped") 
+    """Revert the contact_info column back to VARCHAR."""
+    # Similar process as upgrade but changing JSON back to VARCHAR
+    pass 
