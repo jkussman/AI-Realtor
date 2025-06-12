@@ -137,8 +137,8 @@ def test_database():
     print("\n🗄️ Testing Database...")
     
     try:
-        from db.database import get_database, engine
-        from db.models import Building
+        from backend.db.database import get_database, engine
+        from backend.db.models import Building
         
         # Test database connection
         next(get_database())

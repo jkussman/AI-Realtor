@@ -8,15 +8,17 @@ from sqlalchemy.orm import Session
 from datetime import datetime
 import json
 from sqlalchemy import or_, and_
+import logging
 
 from .get_buildings import BuildingFinder
 from .enrich_building import BuildingEnricher
-from .find_contact import ContactFinder
+from .contact_finder.contact_finder import ContactFinder
 # Commenting out email sender for now
 # from .send_email import EmailSender
-from db.models import Building, ContactSource
+from backend.db.models import Building, ContactSource
 from langchain_openai import OpenAI
 
+logger = logging.getLogger(__name__)
 
 class BuildingPipeline:
     """
@@ -53,7 +55,7 @@ class BuildingPipeline:
         # Initialize pipeline components
         self.building_finder = BuildingFinder(google_api_key)
         self.building_enricher = BuildingEnricher(llm=self.llm)
-        self.contact_finder = ContactFinder(llm=self.llm)
+        self.contact_finder = ContactFinder()
         # Commenting out email sender for now
         # self.email_sender = EmailSender()
     
@@ -80,8 +82,9 @@ class BuildingPipeline:
                     # Enrich building information
                     enriched = await self.building_enricher.enrich_building(building)
                     if enriched:
-                        # Find contact information with emphasis on building manager/realtor
-                        contact_info = await self.contact_finder.find_contact_for_building(enriched)
+                        logger.info(f"Calling ContactFinder for address: {enriched.get('address')}")
+                        contact_info = await self.contact_finder.find_contacts(enriched.get('address'))
+                        logger.info(f"ContactFinder result: {contact_info}")
                         if contact_info:
                             enriched.update(contact_info)
                             
@@ -160,7 +163,7 @@ class BuildingPipeline:
                         
                         # Step 3: Find contact information
                         print(f"\n🔍 Finding contacts for: {enriched_data.get('name')} at {enriched_data.get('address')}")
-                        contact_info = await self.contact_finder.find_contact_for_building(enriched_data)
+                        contact_info = await self.contact_finder.find_contacts(enriched_data.get('address'))
                         if contact_info:
                             print(f"✅ Found contact info:")
                             print(f"  - Email: {contact_info.get('email')}")
@@ -278,7 +281,7 @@ class BuildingPipeline:
             print(f"Processing approved building: {building.address}")
             
             # Step 1: Find contact information with emphasis on building manager/realtor
-            contact_info = await self.contact_finder.find_contact_for_building(building)
+            contact_info = await self.contact_finder.find_contacts(building.get('address'))
             
             if contact_info:
                 # Update building with contact information

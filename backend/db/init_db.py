@@ -3,8 +3,8 @@ Initialize the database with the correct schema.
 """
 
 from sqlalchemy import create_engine
-from models import Base
-from database import DATABASE_URL
+from backend.db.models import Base
+from backend.db.database import DATABASE_URL
 
 def init_db():
     """Initialize the database with all tables."""

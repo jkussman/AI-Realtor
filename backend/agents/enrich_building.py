@@ -10,7 +10,9 @@ from langchain_openai import OpenAI
 from langchain_core.prompts import PromptTemplate
 from geopy.geocoders import Nominatim
 import os
+import logging
 
+logger = logging.getLogger(__name__)
 
 class BuildingEnricher:
     """
@@ -61,24 +63,28 @@ class BuildingEnricher:
         Returns:
             Enriched building data dictionary
         """
-        print(f"Enriching building data for: {building_data.get('address')}")
+        logger.info(f"Enriching building data for: {building_data.get('address')}")
         
         enriched_data = building_data.copy()
         
         # Step 1: Validate and standardize address
         enriched_data = await self._standardize_address(enriched_data)
+        logger.info(f"Standardized address: {enriched_data.get('standardized_address')}, confidence: {enriched_data.get('address_confidence')}")
         
         # Step 2: Get additional property details via web search
         web_data = await self._search_building_online(enriched_data)
+        logger.info(f"Web search data: {web_data}")
         enriched_data.update(web_data)
         
         # Step 3: Use AI to analyze and classify building
         if self.llm:
             ai_analysis = await self._ai_analyze_building(enriched_data)
+            logger.info(f"AI analysis: {ai_analysis}")
             enriched_data.update(ai_analysis)
         
         # Step 4: Confirm it's a residential apartment building
         enriched_data['is_residential_confirmed'] = self._confirm_residential(enriched_data)
+        logger.info(f"Final enriched data: {enriched_data}")
         
         return enriched_data
     
@@ -225,9 +231,11 @@ class BuildingEnricher:
             
             # Format the prompt
             prompt = prompt_template.format(building_data=str(building_data))
+            logger.info(f"OpenAI prompt: {prompt}")
             
             # Get AI response
             response = self.llm(prompt)
+            logger.info(f"Raw OpenAI response: {response}")
             
             # Parse AI response (simplified - in production, use proper JSON parsing)
             ai_insights = {
@@ -241,7 +249,7 @@ class BuildingEnricher:
             return ai_insights
             
         except Exception as e:
-            print(f"Error in AI analysis: {e}")
+            logger.error(f"Error in AI analysis: {e}")
             return {
                 'ai_building_type': 'residential_apartment',
                 'ai_confidence': 'error'

@@ -22,6 +22,7 @@ from agents.building_pipeline import BuildingPipeline
 from agents.get_buildings import BuildingFinder
 # Commenting out Gmail service for now
 # from services.gmail_api import GmailService
+from api.endpoints.contacts import router as contacts_router
 
 # Skip service imports that require Google auth for now
 print("⚠️ Skipping Google services initialization for testing")
@@ -38,7 +39,7 @@ app = FastAPI(
 # CORS middleware for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins in development
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -278,12 +279,13 @@ building_pipeline = RealisticBuildingPipeline()
 print("⚠️ Gmail service skipped for testing (Google verification needed)")
 print("📧 Email features will be disabled until Gmail is set up")
 
+# Include routers
+app.include_router(contacts_router, prefix="/api/contacts", tags=["contacts"])
 
-@app.get("/api/")
+@app.get("/")
 async def root():
-    """Health check endpoint."""
-    return {"message": "AI Realtor API is running"}
-
+    """Root endpoint."""
+    return {"message": "Welcome to AI Realtor API"}
 
 @app.post("/api/process-bbox")
 async def process_bounding_boxes(

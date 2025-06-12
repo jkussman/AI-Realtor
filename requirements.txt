@@ -37,6 +37,7 @@ python-jose>=3.3.0
 passlib>=1.7.4
 bcrypt>=4.1.0
 aiofiles>=23.2.0
+pyee==8.2.2
 
 # Development
 pytest==7.4.3

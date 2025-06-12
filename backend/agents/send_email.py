@@ -8,8 +8,8 @@ from datetime import datetime
 import os
 from sqlalchemy.orm import Session
 
-from services.gmail_api import GmailService
-from db.models import EmailLog
+from backend.services.gmail_api import GmailService
+from backend.db.models import EmailLog
 
 
 class EmailSender:

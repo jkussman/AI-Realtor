@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime
 
-from db.database import get_database
-from db.models import Building
+from backend.db.database import get_database
+from backend.db.models import Building
 
 # Create simple FastAPI app
 app = FastAPI(title="AI Realtor API - Simple Mode")

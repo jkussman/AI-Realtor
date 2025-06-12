@@ -6,8 +6,8 @@ from typing import List
 import uvicorn
 from datetime import datetime
 
-from db.database import get_database
-from db.models import Building, EmailLog
+from backend.db.database import get_database
+from backend.db.models import Building, EmailLog
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])

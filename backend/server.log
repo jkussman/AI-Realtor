@@ -1,0 +1,40 @@
+/Users/jackkussman/AI-Realtor/backend/main.py:43: DeprecationWarning: 
+        on_event is deprecated, use lifespan event handlers instead.
+
+        Read more about it in the
+        [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+        
+  @app.on_event("startup")
+INFO:     Started server process [41961]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+⚠️ Skipping Google services initialization for testing
+✅ Initializing realistic building pipeline...
+✅ OpenAI API key configured for building research
+✅ Building finder initialized
+⚠️ Gmail service skipped for testing (Google verification needed)
+📧 Email features will be disabled until Gmail is set up
+Initializing database...
+Database initialized successfully!
+INFO:     127.0.0.1:65322 - "GET /api/ HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65324 - "DELETE /api/buildings HTTP/1.1" 200 OK
+INFO:     127.0.0.1:65327 - "POST /api/process-bbox HTTP/1.1" 200 OK
+Processing 1 bounding boxes with realistic building finder...
+Researching real buildings using OpenAI for bbox: {'north': 40.76, 'south': 40.75, 'east': -73.97, 'west': -73.98}
+🔍 Using OpenAI to research detailed building info in Murray Hill
+INFO:     127.0.0.1:65333 - "GET /api/buildings HTTP/1.1" 200 OK
+📋 OpenAI response: [
+  {
+    "address": "10 Park Avenue, New York, NY 10016",
+    "name": "10 Park Avenue Apartments",
+    "latitude": 40.7502,
+    "longitude": -73.9813,
+    "building_type": "residential_apartment",
+    "is_coop": false,
+    "is_mixed_use": false,
+    "total_apartments": 210,
+    "two_bedroom_apartme...
+✅ OpenAI found 5 detailed buildings
+✅ Created 5 realistic buildings from building finder
+INFO:     127.0.0.1:65411 - "GET / HTTP/1.1" 404 Not Found

@@ -107,7 +107,7 @@ The system uses a multi-step AI agent pipeline:
    - Validates building type and address
    - Uses AI analysis for property insights
 
-3. **Contact Finding** (`find_contact_for_building`)
+3. **Contact Finding** (`find_contacts`)
    - Searches web for property manager contacts
    - Extracts email addresses and names
    - Multiple search strategies with confidence scoring
