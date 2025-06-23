@@ -20,25 +20,39 @@ logger = logging.getLogger(__name__)
 class ContactFinder:
     """Autonomous agent for finding building contacts in NYC."""
     
-    def __init__(self):
+    def __init__(self, browser=None, context=None, page=None):
         """Initialize the contact finder."""
-        self.browser = None
-        self.context = None
-        self.page = None
+        self.browser = browser
+        self.context = context
+        self.page = page
         self.cache = {}  # Simple in-memory cache
+        self._playwright = None
         
     async def __aenter__(self):
-        """Set up browser context."""
-        playwright = await async_playwright().start()
-        self.browser = await playwright.chromium.launch(headless=True)
-        self.context = await self.browser.new_context()
-        self.page = await self.context.new_page()
+        """Set up browser context if not provided."""
+        if not self.browser:
+            try:
+                self._playwright = await async_playwright().start()
+                self.browser = await self._playwright.chromium.launch(headless=True)
+                self.context = await self.browser.new_context()
+                self.page = await self.context.new_page()
+            except Exception as e:
+                logger.error(f"Failed to initialize browser: {str(e)}")
+                return self
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
-        """Clean up browser context."""
+        """Clean up browser context if we created it."""
         if self.browser:
-            await self.browser.close()
+            try:
+                await self.browser.close()
+            except Exception as e:
+                logger.error(f"Error closing browser: {str(e)}")
+        if self._playwright:
+            try:
+                await self._playwright.stop()
+            except Exception as e:
+                logger.error(f"Error stopping playwright: {str(e)}")
             
     async def find_contacts(self, address: str) -> Dict:
         logger.info(f"ContactFinder.find_contacts called with address: {address}")
@@ -47,6 +61,11 @@ class ContactFinder:
             if address in self.cache:
                 logger.info(f"Using cached results for {address}")
                 return self.cache[address]
+            
+            # If browser is not initialized, return empty result
+            if not self.page:
+                logger.warning("Browser not initialized, skipping contact finding")
+                return self._create_empty_result(address)
             
             # Step 1: Get owner/manager from JustFix
             owner_info = await self._get_justfix_info(address)
@@ -74,23 +93,49 @@ class ContactFinder:
         """Get property owner/manager info from JustFix."""
         try:
             # Navigate to JustFix
-            await self.page.goto('https://whoownswhat.justfix.org')
+            await self.page.goto('https://whoownswhat.justfix.org', wait_until='networkidle')
             
             # Wait for search input and enter address
-            await self.page.wait_for_selector('input[type="search"]')
-            await self.page.fill('input[type="search"]', address)
-            await self.page.press('input[type="search"]', 'Enter')
+            search_input = await self.page.wait_for_selector('input[type="search"], input[placeholder*="search"], input[placeholder*="address"]', timeout=10000)
+            if not search_input:
+                logger.error("Could not find search input on JustFix page")
+                return None
+                
+            await search_input.fill(address)
+            await search_input.press('Enter')
             
-            # Wait for results
-            await self.page.wait_for_selector('.property-info', timeout=10000)
+            # Wait for results with multiple possible selectors
+            try:
+                await self.page.wait_for_selector('.property-info, .search-results, .result-item', timeout=10000)
+            except Exception as e:
+                logger.error(f"Timeout waiting for JustFix results: {str(e)}")
+                return None
             
-            # Extract owner/manager info
+            # Extract owner/manager info with multiple possible selectors
             owner_info = await self.page.evaluate('''() => {
-                const owner = document.querySelector('.owner-name')?.textContent;
-                const manager = document.querySelector('.manager-name')?.textContent;
-                return { owner, manager };
+                const selectors = {
+                    owner: ['.owner-name', '.owner', '.property-owner', '[data-testid="owner-name"]'],
+                    manager: ['.manager-name', '.manager', '.property-manager', '[data-testid="manager-name"]']
+                };
+                
+                const getText = (selectors) => {
+                    for (const selector of selectors) {
+                        const element = document.querySelector(selector);
+                        if (element) return element.textContent.trim();
+                    }
+                    return null;
+                };
+                
+                return {
+                    owner: getText(selectors.owner),
+                    manager: getText(selectors.manager)
+                };
             }''')
             
+            if not owner_info.get('owner') and not owner_info.get('manager'):
+                logger.warning("No owner or manager information found on JustFix page")
+                return None
+                
             return owner_info
             
         except Exception as e:
@@ -295,11 +340,13 @@ class ContactFinder:
         return domain in title
         
     def _create_empty_result(self, address: str) -> Dict:
-        """Create an empty result object."""
+        """Create an empty result dictionary."""
         return {
-            'input_address': address,
-            'manager_name': None,
-            'manager_website': None,
-            'contact_email': None,
-            'contact_form': None
+            'address': address,
+            'email': None,
+            'name': None,
+            'phone': None,
+            'title': None,
+            'source': None,
+            'confidence': None
         } 

@@ -3,13 +3,16 @@ Agent for sending emails to property contacts via Gmail API.
 """
 
 import asyncio
+import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
-import os
+import json
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
+import os
 
-from backend.services.gmail_api import GmailService
-from backend.db.models import EmailLog
+from services.gmail_api import GmailService
+from db.models import EmailLog
 
 
 class EmailSender:

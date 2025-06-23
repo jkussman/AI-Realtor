@@ -128,152 +128,6 @@ class BuildingResponse(BaseModel):
 # Enable real building discovery without Google OAuth requirements
 print("✅ Initializing realistic building pipeline...")
 
-# Create a custom pipeline that uses real building finding but skips Google services
-class RealisticBuildingPipeline:
-    def __init__(self):
-        self.building_finder = BuildingFinder()
-        print("✅ Building finder initialized")
-    
-    def process_bounding_boxes(self, bboxes, db):
-        """Find real buildings using the BuildingFinder."""
-        import asyncio
-        import json
-        from db.models import Building
-        
-        print(f"Processing {len(bboxes)} bounding boxes with realistic building finder...")
-        
-        buildings_created = []
-        
-        try:
-            # Use asyncio to call the async building finder
-            for bbox in bboxes:
-                bbox_dict = {
-                    "north": bbox.north,
-                    "south": bbox.south, 
-                    "east": bbox.east,
-                    "west": bbox.west
-                }
-                
-                # Get real buildings from the building finder
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                buildings_data = loop.run_until_complete(
-                    self.building_finder.get_buildings_from_bbox(bbox_dict)
-                )
-                loop.close()
-                
-                # Create building records in database
-                for building_data in buildings_data:
-                    try:
-                        # Ensure building_data is a dictionary
-                        if isinstance(building_data, str):
-                            print(f"⚠️ Received string instead of dict: {building_data[:100]}")
-                            continue
-
-                        # Check for duplicates before creating
-                        address = building_data.get('address')
-                        name = building_data.get('name')
-                        standardized_address = building_data.get('standardized_address')
-                        
-                        if not address and not name:
-                            print(f"⚠️ Skipping building with no address or name: {building_data}")
-                            continue
-
-                        # Query for existing buildings with exact address match
-                        existing_building = db.query(Building).filter(
-                            or_(
-                                Building.address == address if address else False,
-                                Building.standardized_address == standardized_address if standardized_address else False,
-                                Building.name == name if name else False
-                            )
-                        ).first()
-
-                        if existing_building:
-                            print(f"⚠️ Skipping duplicate building: {address or name}")
-                            continue
-
-                        # Create new building record
-                        new_building = Building(
-                            name=name,
-                            address=address,
-                            standardized_address=standardized_address,
-                            latitude=building_data.get('latitude'),
-                            longitude=building_data.get('longitude'),
-                            building_type=building_data.get('building_type', 'residential'),
-                            bounding_box=json.dumps(bbox_dict),
-                            approved=False,
-                            email_sent=False,
-                            reply_received=False,
-                            
-                            # Contact information
-                            contact_email=building_data.get('contact_email'),
-                            contact_name=building_data.get('contact_name'),
-                            contact_phone=building_data.get('phone') or building_data.get('contact_phone'),
-                            website=building_data.get('website'),
-                            contact_source=building_data.get('contact_source'),
-                            contact_source_url=building_data.get('contact_source_url'),
-                            contact_email_confidence=building_data.get('contact_email_confidence', 0),
-                            contact_verified=building_data.get('contact_verified', False),
-                            verification_notes=building_data.get('verification_notes'),
-                            verification_flags=building_data.get('verification_flags'),
-                            
-                            # Basic building info
-                            property_manager=building_data.get('property_manager'),
-                            number_of_units=building_data.get('number_of_units'),
-                            year_built=building_data.get('year_built'),
-                            square_footage=building_data.get('square_footage'),
-                            
-                            # Detailed rental information
-                            is_coop=building_data.get('is_coop', False),
-                            is_mixed_use=building_data.get('is_mixed_use', False),
-                            total_apartments=building_data.get('total_apartments'),
-                            two_bedroom_apartments=building_data.get('two_bedroom_apartments'),
-                            recent_2br_rent=building_data.get('recent_2br_rent'),
-                            rent_range_2br=building_data.get('rent_range_2br'),
-                            has_laundry=building_data.get('has_laundry', False),
-                            laundry_type=building_data.get('laundry_type'),
-                            amenities=json.dumps(building_data.get('amenities', [])),
-                            pet_policy=building_data.get('pet_policy'),
-                            building_style=building_data.get('building_style'),
-                            management_company=building_data.get('management_company'),
-                            contact_info=json.dumps(building_data.get('contact_info', {})),
-                            recent_availability=building_data.get('recent_availability', False),
-                            rental_notes=building_data.get('rental_notes'),
-                            neighborhood=building_data.get('neighborhood'),
-                            stories=building_data.get('stories')
-                        )
-                        
-                        db.add(new_building)
-                        db.commit()
-                        print(f"✅ Created new building: {address or name}")
-                    except Exception as e:
-                        print(f"❌ Error creating building: {str(e)}")
-                        db.rollback()
-                        continue
-            
-            db.commit()
-            print(f"✅ Created {len(buildings_created)} realistic buildings from building finder")
-            return {"status": "completed", "buildings_found": len(buildings_created)}
-            
-        except Exception as e:
-            print(f"Error in realistic building pipeline: {e}")
-            db.rollback()
-            raise e
-    
-    def process_approved_building(self, building_id, db):
-        print(f"📧 Would process building {building_id} (email features disabled)")
-        # Mark building as having email sent for demo purposes
-        from db.models import Building
-        building = db.query(Building).filter(Building.id == building_id).first()
-        if building:
-            building.email_sent = True
-            building.contact_email = "demo@example.com"
-            building.contact_name = "Demo Contact"
-            db.commit()
-        return {"status": "completed"}
-
-building_pipeline = RealisticBuildingPipeline()
-
 # Skip Gmail for testing
 # gmail_service = None
 print("⚠️ Gmail service skipped for testing (Google verification needed)")
@@ -304,23 +158,12 @@ async def process_bounding_boxes(
                 status_code=503, 
                 detail="Building pipeline service not available. Please check your API keys and configuration."
             )
-        
-        # For real BuildingPipeline, call the async method directly
-        if hasattr(building_pipeline, 'process_bounding_boxes_sync'):
-            # Real BuildingPipeline with async support
-            background_tasks.add_task(
-                building_pipeline.process_bounding_boxes_sync,
-                request.bounding_boxes,
-                db
-            )
-        else:
-            # Fallback synchronous pipeline
-            background_tasks.add_task(
-                building_pipeline.process_bounding_boxes,
-                request.bounding_boxes,
-                db
-            )
-        
+        # Use the full async pipeline for enrichment and contact finding
+        background_tasks.add_task(
+            building_pipeline.process_bounding_boxes_sync,
+            request.bounding_boxes,
+            db
+        )
         return {
             "message": "Processing bounding boxes started",
             "status": "processing",

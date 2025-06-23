@@ -2,9 +2,11 @@
 Initialize the database with the correct schema.
 """
 
+import os
+import sys
 from sqlalchemy import create_engine
-from backend.db.models import Base
-from backend.db.database import DATABASE_URL
+from db.models import Base
+from db.database import DATABASE_URL
 
 def init_db():
     """Initialize the database with all tables."""

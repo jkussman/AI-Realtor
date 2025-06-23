@@ -3,7 +3,7 @@ Main building pipeline that orchestrates all agent steps.
 """
 
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from datetime import datetime
 import json
@@ -13,10 +13,10 @@ import logging
 from .get_buildings import BuildingFinder
 from .enrich_building import BuildingEnricher
 from .contact_finder.contact_finder import ContactFinder
-# Commenting out email sender for now
-# from .send_email import EmailSender
-from backend.db.models import Building, ContactSource
+from db.models import Building, ContactSource
 from langchain_openai import OpenAI
+from playwright.async_api import async_playwright
+from .utils.bounding_box import BoundingBox
 
 logger = logging.getLogger(__name__)
 
@@ -31,33 +31,48 @@ class BuildingPipeline:
         self.llm = OpenAI(
             api_key=openai_api_key,
             temperature=0,
-            model_name="gpt-4-turbo-preview",
-            tools=[{
-                "type": "function",
-                "function": {
-                    "name": "web_search",
-                    "description": "Search the web for real-time information about buildings and real estate.",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "query": {
-                                "type": "string",
-                                "description": "The search query"
-                            }
-                        },
-                        "required": ["query"]
-                    }
-                }
-            }],
-            tool_choice="auto"  # Let the model decide when to search
+            model_name="gpt-4-turbo-preview"
         )
         
         # Initialize pipeline components
         self.building_finder = BuildingFinder(google_api_key)
         self.building_enricher = BuildingEnricher(llm=self.llm)
+        
+        # Initialize browser for contact finder
+        self.browser = None
+        self.context = None
+        self.page = None
+        
+        # Initialize contact finder
         self.contact_finder = ContactFinder()
-        # Commenting out email sender for now
-        # self.email_sender = EmailSender()
+        
+    async def _init_browser(self):
+        """Initialize browser for contact finder."""
+        try:
+            playwright = await async_playwright().start()
+            self.browser = await playwright.chromium.launch(headless=True)
+            self.context = await self.browser.new_context()
+            self.page = await self.context.new_page()
+            
+            # Update contact finder with browser instance
+            self.contact_finder.browser = self.browser
+            self.contact_finder.context = self.context
+            self.contact_finder.page = self.page
+            
+            logger.info("Browser initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize browser: {str(e)}")
+            
+    async def __aenter__(self):
+        """Set up browser context."""
+        await self._init_browser()
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Clean up browser context."""
+        if hasattr(self, 'browser') and self.browser:
+            await self.browser.close()
+            logger.info("Browser closed")
     
     async def process_buildings(self, location: Dict[str, float], search_radius: int = 1000) -> List[Dict[str, Any]]:
         """
@@ -83,14 +98,17 @@ class BuildingPipeline:
                     enriched = await self.building_enricher.enrich_building(building)
                     if enriched:
                         logger.info(f"Calling ContactFinder for address: {enriched.get('address')}")
-                        contact_info = await self.contact_finder.find_contacts(enriched.get('address'))
-                        logger.info(f"ContactFinder result: {contact_info}")
-                        if contact_info:
-                            enriched.update(contact_info)
-                            
-                            # Store additional contact sources if found
-                            if isinstance(contact_info.get('additional_sources'), list):
-                                enriched['contact_sources'] = contact_info['additional_sources']
+                        try:
+                            contact_info = await self.contact_finder.find_contacts(enriched.get('address'))
+                            if contact_info:
+                                enriched.update(contact_info)
+                                
+                                # Store additional contact sources if found
+                                if isinstance(contact_info.get('additional_sources'), list):
+                                    enriched['contact_sources'] = contact_info['additional_sources']
+                        except Exception as contact_error:
+                            logger.error(f"Contact finding failed for {enriched.get('address')}: {str(contact_error)}")
+                            # Continue processing without contact info
                         
                         processed_buildings.append(enriched)
                 except Exception as e:
@@ -163,18 +181,23 @@ class BuildingPipeline:
                         
                         # Step 3: Find contact information
                         print(f"\n🔍 Finding contacts for: {enriched_data.get('name')} at {enriched_data.get('address')}")
-                        contact_info = await self.contact_finder.find_contacts(enriched_data.get('address'))
-                        if contact_info:
-                            print(f"✅ Found contact info:")
-                            print(f"  - Email: {contact_info.get('email')}")
-                            print(f"  - Name: {contact_info.get('name')}")
-                            print(f"  - Phone: {contact_info.get('contact_phone')}")
-                            print(f"  - Title: {contact_info.get('title')}")
-                            print(f"  - Source: {contact_info.get('source')}")
-                            print(f"  - Confidence: {contact_info.get('contact_email_confidence')}")
-                            enriched_data.update(contact_info)
-                        else:
-                            print(f"⚠️ No contact information found")
+                        contact_info = None
+                        try:
+                            contact_info = await self.contact_finder.find_contacts(enriched_data.get('address'))
+                            if contact_info:
+                                print(f"✅ Found contact info:")
+                                print(f"  - Email: {contact_info.get('email')}")
+                                print(f"  - Name: {contact_info.get('name')}")
+                                print(f"  - Phone: {contact_info.get('contact_phone')}")
+                                print(f"  - Title: {contact_info.get('title')}")
+                                print(f"  - Source: {contact_info.get('source')}")
+                                print(f"  - Confidence: {contact_info.get('contact_email_confidence')}")
+                                enriched_data.update(contact_info)
+                            else:
+                                print(f"⚠️ No contact information found")
+                        except Exception as contact_error:
+                            print(f"⚠️ Contact finding failed: {str(contact_error)}")
+                            # Continue processing without contact info
                         
                         # Step 4: Save to database
                         building = Building(
@@ -184,7 +207,12 @@ class BuildingPipeline:
                             latitude=str(enriched_data.get('latitude')) if enriched_data.get('latitude') else None,
                             longitude=str(enriched_data.get('longitude')) if enriched_data.get('longitude') else None,
                             building_type=enriched_data.get('building_type', 'residential_apartment'),
-                            bounding_box=json.dumps(bbox),
+                            bounding_box=json.dumps({
+                                'north': bbox.get('north'),
+                                'south': bbox.get('south'),
+                                'east': bbox.get('east'),
+                                'west': bbox.get('west')
+                            }),
                             approved=False,
                             email_sent=False,
                             reply_received=False,
@@ -206,8 +234,6 @@ class BuildingPipeline:
                             number_of_units=enriched_data.get('number_of_units'),
                             year_built=enriched_data.get('year_built'),
                             square_footage=enriched_data.get('square_footage'),
-                            
-                            # Detailed rental information
                             is_coop=enriched_data.get('is_coop', False),
                             is_mixed_use=enriched_data.get('is_mixed_use', False),
                             total_apartments=enriched_data.get('total_apartments'),
@@ -323,4 +349,65 @@ class BuildingPipeline:
     
     def process_approved_building_sync(self, building_id: int, db: Session):
         """Synchronous wrapper for async approved building processing."""
-        return asyncio.run(self.process_approved_building(building_id, db)) 
+        return asyncio.run(self.process_approved_building(building_id, db))
+    
+    async def process_building(self, building: Dict[str, Any], bbox: BoundingBox, db: Session) -> Optional[Dict[str, Any]]:
+        """Process a single building through the pipeline."""
+        try:
+            # Step 1: Enrich building data
+            enriched_data = await self.building_enricher.enrich_building(building)
+            if not enriched_data:
+                logger.warning(f"Failed to enrich building data for {building.get('address')}")
+                return None
+                
+            # Step 2: Only find contacts if building was successfully enriched
+            if enriched_data.get('ai_building_type') != 'unknown' and enriched_data.get('ai_confidence') != 'error':
+                try:
+                    contact_info = await self.contact_finder.find_contacts(enriched_data['address'])
+                    if contact_info:
+                        enriched_data['contact_info'] = contact_info
+                except Exception as e:
+                    logger.error(f"Error finding contacts for {enriched_data['address']}: {str(e)}")
+                    # Continue processing even if contact finding fails
+            else:
+                logger.info(f"Skipping contact finding for unenriched building: {enriched_data['address']}")
+            
+            # Step 3: Save to database
+            try:
+                building_model = Building(
+                    address=enriched_data['address'],
+                    name=enriched_data.get('name'),
+                    building_type=enriched_data.get('building_type'),
+                    website=enriched_data.get('website'),
+                    contact_info=enriched_data.get('contact_info', {}),
+                    verified=enriched_data.get('verified', False),
+                    confidence=enriched_data.get('confidence', 0.0),
+                    additional_info=enriched_data.get('additional_info'),
+                    address_confidence=enriched_data.get('address_confidence'),
+                    number_of_units=enriched_data.get('number_of_units'),
+                    year_built=enriched_data.get('year_built'),
+                    square_footage=enriched_data.get('square_footage'),
+                    amenities=enriched_data.get('amenities', []),
+                    building_class=enriched_data.get('building_class'),
+                    rent_stabilized=enriched_data.get('rent_stabilized', False),
+                    web_search_confidence=enriched_data.get('web_search_confidence'),
+                    ai_building_type=enriched_data.get('ai_building_type'),
+                    ai_manager_type=enriched_data.get('ai_manager_type'),
+                    ai_investment_rating=enriched_data.get('ai_investment_rating'),
+                    ai_notes=enriched_data.get('ai_notes'),
+                    ai_confidence=enriched_data.get('ai_confidence'),
+                    is_residential_confirmed=enriched_data.get('is_residential_confirmed', False)
+                )
+                db.add(building_model)
+                db.commit()
+                db.refresh(building_model)
+                logger.info(f"Successfully saved building to database: {enriched_data['address']}")
+                return enriched_data
+            except Exception as e:
+                logger.error(f"Error saving building to database: {str(e)}")
+                db.rollback()
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error processing building {building.get('address')}: {str(e)}")
+            return None 

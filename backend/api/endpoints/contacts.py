@@ -2,10 +2,13 @@
 API endpoints for finding building contacts.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from typing import List, Dict, Any, Optional
 from pydantic import BaseModel
-from typing import Optional
-from backend.agents.contact_finder.contact_finder import ContactFinder
+from datetime import datetime
+
+from agents.contact_finder.contact_finder import ContactFinder
 
 router = APIRouter()
 

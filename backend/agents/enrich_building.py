@@ -11,6 +11,7 @@ from langchain_core.prompts import PromptTemplate
 from geopy.geocoders import Nominatim
 import os
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -32,25 +33,7 @@ class BuildingEnricher:
             self.llm = OpenAI(
                 api_key=self.openai_api_key,
                 temperature=0.1,
-                model_name="gpt-4-turbo-preview",
-                tools=[{
-                    "type": "function",
-                    "function": {
-                        "name": "web_search",
-                        "description": "Search the web for real-time information about buildings and real estate.",
-                        "parameters": {
-                            "type": "object",
-                            "properties": {
-                                "query": {
-                                    "type": "string",
-                                    "description": "The search query"
-                                }
-                            },
-                            "required": ["query"]
-                        }
-                    }
-                }],
-                tool_choice="auto"  # Let the model decide when to search
+                model_name="gpt-4-turbo-preview"
             )
     
     async def enrich_building(self, building_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -207,14 +190,9 @@ class BuildingEnricher:
         return mock_data
     
     async def _ai_analyze_building(self, building_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Use AI to analyze building data and extract insights.
-        """
+        """Use AI to analyze building data and extract insights."""
         try:
-            # Create prompt for AI analysis
-            prompt_template = PromptTemplate(
-                input_variables=["building_data"],
-                template="""
+            prompt = f"""
                 Analyze the following building data and provide insights:
                 
                 Building Data: {building_data}
@@ -227,32 +205,45 @@ class BuildingEnricher:
                 
                 Format your response as JSON with keys: building_type, manager_type, investment_rating, notes
                 """
-            )
             
-            # Format the prompt
-            prompt = prompt_template.format(building_data=str(building_data))
             logger.info(f"OpenAI prompt: {prompt}")
             
-            # Get AI response
-            response = self.llm(prompt)
-            logger.info(f"Raw OpenAI response: {response}")
+            # Use chat completions endpoint
+            response = await self.llm.ainvoke([
+                {"role": "system", "content": "You are a real estate analysis expert. Analyze the building data and provide structured insights."},
+                {"role": "user", "content": prompt}
+            ])
             
-            # Parse AI response (simplified - in production, use proper JSON parsing)
-            ai_insights = {
-                'ai_building_type': 'residential_apartment',
-                'ai_manager_type': random.choice(['large_company', 'small_local', 'individual']),
-                'ai_investment_rating': random.choice(['high', 'medium', 'low']),
-                'ai_notes': 'AI analysis completed',
-                'ai_confidence': 'mock_response'
-            }
-            
-            return ai_insights
-            
+            try:
+                # Parse the JSON response
+                insights = json.loads(response.content)
+                logger.info(f"AI analysis response: {insights}")
+                
+                return {
+                    "ai_building_type": insights.get("building_type", "unknown"),
+                    "ai_manager_type": insights.get("manager_type", "unknown"),
+                    "ai_investment_rating": insights.get("investment_rating", "unknown"),
+                    "ai_notes": insights.get("notes", ""),
+                    "ai_confidence": "high"  # We trust the model's analysis
+                }
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing AI response: {str(e)}")
+                return {
+                    "ai_building_type": "unknown",
+                    "ai_manager_type": "unknown",
+                    "ai_investment_rating": "unknown",
+                    "ai_notes": f"Error parsing response: {str(e)}",
+                    "ai_confidence": "error"
+                }
+                
         except Exception as e:
-            logger.error(f"Error in AI analysis: {e}")
+            logger.error(f"Error in AI analysis: {str(e)}")
             return {
-                'ai_building_type': 'residential_apartment',
-                'ai_confidence': 'error'
+                "ai_building_type": "unknown",
+                "ai_manager_type": "unknown",
+                "ai_investment_rating": "unknown",
+                "ai_notes": f"Error: {str(e)}",
+                "ai_confidence": "error"
             }
     
     def _confirm_residential(self, building_data: Dict[str, Any]) -> bool:

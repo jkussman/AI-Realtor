@@ -80,6 +80,9 @@ class BuildingFinder:
         Use Google Places API to find buildings in the given bounding box.
         """
         try:
+            # Convert bbox to dict if it's a Pydantic model
+            if hasattr(bbox, 'dict'):
+                bbox = bbox.dict()
             # Calculate center point and radius for the search
             center_lat = (bbox['north'] + bbox['south']) / 2
             center_lng = (bbox['east'] + bbox['west']) / 2
@@ -299,7 +302,7 @@ class BuildingFinder:
 
     async def _enhance_buildings_with_openai(self, buildings: List[Dict[str, Any]], bbox: Dict[str, float]) -> List[Dict[str, Any]]:
         """
-        Use OpenAI to enhance building data and find contact information.
+        Use OpenAI to enhance building data with specific details about the building type, units, and amenities.
         Process buildings in batches to avoid timeouts.
         """
         try:
@@ -323,24 +326,27 @@ class BuildingFinder:
 {buildings_str}
 
 For each building, search the web to find and verify:
-1. The correct building name and address
-2. Building type (residential, commercial, mixed-use)
-3. Contact information (focus on finding email addresses and websites)
-4. Any additional useful information
+1. Building type (Co-op, Condo, Rental, Mixed Use)
+2. Total number of apartments/units
+3. Whether there have been 2-bedroom units available for rent in the past year
+4. Building amenities and features
+5. Any notable building characteristics or history
 
 Return a JSON array with the enhanced building information. Each building should have these fields:
 - name: string
 - address: string
-- building_type: string
-- website: string
-- contact_info: object with any additional contact details (focus on email)
+- building_type: string (Co-op, Condo, Rental, Mixed Use)
+- total_units: number
+- has_2br_rentals: boolean
+- amenities: array of strings
+- building_features: object with additional details
 - verified: boolean (true if information was verified)
 - confidence: number (0-1)
 - additional_info: string (any other useful information)"""
 
                 try:
                     messages = [
-                        {"role": "system", "content": "You are a NYC real estate expert with web search capabilities. Research and enhance building details with accurate information from the web. Focus on finding email contacts. Return ONLY a valid JSON array."},
+                        {"role": "system", "content": "You are a NYC real estate expert with web search capabilities. Research and enhance building details with accurate information from the web. Focus on building type, unit count, and amenities. Return ONLY a valid JSON array."},
                         {"role": "user", "content": prompt}
                     ]
 
@@ -365,8 +371,8 @@ Return a JSON array with the enhanced building information. Each building should
                                 # Mock web search results for now
                                 search_results = f"Found information about {search_query}:\n"
                                 search_results += "- Type: Residential apartment building\n"
-                                search_results += "- Contact: Available on official website\n"
-                                search_results += "- Additional: Modern amenities, doorman building"
+                                search_results += "- Units: Multiple units available\n"
+                                search_results += "- Amenities: Modern building features"
                                 
                                 # Add tool result back to conversation
                                 messages.append({
