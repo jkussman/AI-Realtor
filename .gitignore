@@ -7,7 +7,6 @@ __pycache__/
 *.so
 *.Python
 backend/venv/
-backend/.env
 
 
 # Database
