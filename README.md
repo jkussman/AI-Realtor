@@ -17,6 +17,41 @@ An agentic AI system that helps identify residential apartment buildings in New 
 - **Interactive building management** interface
 - **Real-time status tracking** and notifications
 
+## 🚀 Quick Start
+### Prerequisites
+- Python 3.8+
+- Node.js 16+
+- Gmail account for email automation
+- OpenAI API key (recommended)
+### 1. Backend Setup
+```bash
+# Navigate to project root
+cd AI-Realtor
+# Install Python dependencies
+pip install -r requirements.txt
+# Copy environment template (if .env.example exists)
+cp .env.example .env
+# Edit .env with your API keys
+# OPENAI_API_KEY=your_openai_key_here
+# FROM_EMAIL=your_gmail@gmail.com
+# FROM_NAME=Your Name
+# Initialize database
+cd backend
+python -c "from db.database import init_database; init_database()"
+# Start the FastAPI server
+python main.py
+```
+The backend will be available at `http://localhost:8000`
+### 2. Frontend Setup
+```bash
+# Navigate to frontend directory
+cd frontend
+# Install dependencies
+npm install
+# Start the development server
+npm start
+```
+The frontend will be available at `http://localhost:3000`
 
 ## 📜 License
 
