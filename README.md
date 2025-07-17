@@ -18,20 +18,6 @@ An agentic AI system that helps identify residential apartment buildings in New 
 - **Real-time status tracking** and notifications
 
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create feature branch
-3. Make changes with tests
-4. Submit pull request
-
-### Development Guidelines
-- Use type hints in Python
-- Follow React/TypeScript best practices
-- Add error handling for all external API calls
-- Test with mock data before real integrations
-- Document new features and APIs
-
 ## 📜 License
 
 This project is for educational and development purposes. Ensure compliance with all applicable laws and terms of service when using real estate data sources and email automation.
